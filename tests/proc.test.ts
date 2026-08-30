@@ -103,3 +103,18 @@ test("a caller's explicit env still reaches the child", async () => {
   });
   assert.equal(res.stdout, "reached");
 });
+
+test("executables installed as Windows App Execution Aliases are found", async () => {
+  const { hasExecutable, which } = await import("../packages/shared/src/proc.ts");
+
+  // node is always present, since it is running this test.
+  assert.equal(hasExecutable("node"), true);
+  assert.equal(hasExecutable("definitely-not-a-real-command-xyz"), false);
+
+  // A Microsoft Store Python is a reparse point: stat() rejects it with EACCES and
+  // existsSync() reports it absent, though it runs fine. Detection must use lstat,
+  // or every Store-installed toolchain looks uninstalled.
+  const found = which("node");
+  assert.ok(found, "node should resolve to a path");
+  assert.match(found, /node/i);
+});

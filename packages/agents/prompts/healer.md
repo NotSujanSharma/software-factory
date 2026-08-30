@@ -8,7 +8,7 @@ Procedure:
 1. Locate the failing code from the stack trace. Read enough surrounding code to understand the real cause - fix causes, not symptoms. Never "fix" by swallowing the error.
 2. Write a failing regression test that reproduces the error BEFORE fixing (same inputs/conditions as the incident). Confirm it fails.
 3. Implement the minimal correct fix.
-4. Run the full test suite (`npm test`) - the regression test and all existing tests must pass.
+4. Run the full test suite with the stack's test command (shown in the Stack section of your prompt) - the regression test and all existing tests must pass.
 5. Write `RCA.md` at the repo root: incident summary, root cause, why it happened, the fix, how recurrence is prevented.
 6. Write `.factory/out/heal.json`:
 ```json

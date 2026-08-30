@@ -4,7 +4,7 @@ A multi-agent framework that builds applications from a prompt, then keeps them 
 
 ## What it does
 
-**Build pipeline** (`factory build`): requirements gathering -> architecture + task DAG -> parallel developer agents -> QA loop -> code review loop -> security audit -> acceptance-criteria validation -> deploy (GitHub push + local run) -> evolution analysis. Every gate feeds defects back to developer agents, bounded by configurable iteration limits.
+**Build pipeline** (`factory build`): requirements gathering -> architecture + stack choice + task DAG -> parallel developer agents -> QA loop -> code review loop -> security audit -> acceptance-criteria validation -> deploy (GitHub push + local run) -> evolution analysis. Every gate feeds defects back to developer agents, bounded by configurable iteration limits. The architect picks the language, framework and data store that suit the request - see [Any language, any framework](#any-language-any-framework).
 
 **Runtime self-healing** (`factory sentinel start`): a global error handler vendored into each built app reports runtime errors to the sentinel — server-side (Express middleware + `uncaughtException`/`unhandledRejection`) and, for apps that serve a UI, browser-side (`window.onerror` + `unhandledrejection`, sent via `sendBeacon` so a fatal error still reports as the page dies). Errors are fingerprinted and deduplicated into incidents (same error twice = one incident, never two healing agents). A healing agent claims the incident, clones the repo, reproduces the bug with a failing regression test, fixes the root cause, and opens a GitHub PR with an RCA writeup. When you merge, the sentinel redeploys and resolves the incident; recurrences reopen it with prior-fix context.
 
@@ -149,6 +149,81 @@ Patterns added in `sandbox.denyCommands` are **added to** the built-in list, nev
 substituted for it: adding one project rule must not silently drop fifteen safety
 rules.
 
+## Any language, any framework
+
+The factory is not a Node factory. `npm install`, `npm test` and `npm start` used to
+be written into the orchestrator, the healer, the scheduler and six prompts;
+supporting a second language that way would have meant a branch per ecosystem, and
+there are far too many frameworks inside each one for that to end well.
+
+So the commands are **data**. The architect chooses a stack, writes it to
+`.factory/stack.json`, and every later stage reads its commands from there.
+Nothing downstream knows what language it is dealing with.
+
+```json
+{
+  "id": "python",
+  "label": "Python 3.12 + FastAPI",
+  "language": "Python",
+  "framework": "FastAPI",
+  "database": "SQLite",
+  "commands": {
+    "install": ["python", "-m", "pip", "install", "-r", "requirements.txt"],
+    "test":    ["python", "-m", "pytest", "-q"],
+    "start":   ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}"]
+  },
+  "portEnv": "PORT",
+  "errorSdk": "python",
+  "requires": ["python"],
+  "ignore": ["__pycache__/", ".venv/"]
+}
+```
+
+Templates ship for Node, Python, Go, Rust, Ruby, Java (Maven and Gradle), .NET, PHP
+and static frontends — but they are starting points, not a closed list. The
+architect can declare a custom stack, and an ecosystem missing from that list is
+still buildable as long as it can be installed, tested and started by one command
+each.
+
+Details that matter:
+
+- **Commands are argv arrays, never shell strings.** They come from an agent and are
+  run by the orchestrator, outside the sandbox that constrains the agent's own tool
+  use, so there is no shell for anything to escape into — and they are still checked
+  against the sandbox deny list, because "start the app" must not be able to mean
+  "shut down the machine".
+- **`${PORT}` is substituted** into arguments for the stacks that need the port on
+  the command line (`uvicorn --port`, `php -S`), and exported as `portEnv` regardless.
+- **The toolchain is verified before any code is written.** The architect is shown
+  which stacks this machine can actually build, and a choice it cannot is a
+  permanent failure at stage two rather than a mystery at stage eight.
+- **An existing repo is detected**, by manifest, so the factory can take over an app
+  it did not build.
+
+### Error reporting per language
+
+Self-healing needs runtime errors to reach the sentinel, which is the one part that
+cannot be pure configuration.
+
+- **Node** and **Python** get a real vendored SDK — global handlers plus framework
+  integration (Express; Flask, FastAPI, Django).
+- **Everything else** gets `FACTORY_ERROR_CONTRACT.md`, a one-endpoint spec, and the
+  deploy agent implements it in the app's own language. That is the only approach
+  that scales past two ecosystems, and the agent is required to verify it end to end
+  — start the app, trigger a real error, confirm the sentinel accepted it — and
+  report the result. If it cannot, the deploy stage says so loudly, because an app
+  whose errors never arrive will never heal.
+
+Fingerprinting understands JavaScript, Python, Go, JVM, Ruby, PHP, Rust and .NET
+stack traces, and skips each ecosystem's vendor directories, so one bug stays one
+incident whatever it was written in.
+
+### What this does not do yet
+
+Deployment is still `start the process on this machine` — no Docker, no cloud
+target. A stack needing a database server will have the architect say so in
+`architecture.md`, but the factory will not provision one for you.
+
 ## Subprocesses
 
 Nothing is spawned through a shell.
@@ -253,6 +328,7 @@ listening", which is a different question and must never decide a rollback.
 - Every agent run is metered, and gated against a spend ceiling before it starts.
 - Every agent tool call passes a guard that refuses the known-catastrophic moves.
 - `/ingest` is authenticated per app and rate limited; registration needs the admin token.
+- Stack commands are argv arrays checked against the deny list before they run.
 - No credential is ever written to disk: remotes carry a username, never a token.
 - The environment is checked before a run spends anything, and a failed check is
   permanent rather than retried.
@@ -264,7 +340,8 @@ packages/shared        types, config, git/GitHub helpers, process utils
 packages/agents        agent runner (Claude Agent SDK) + role prompts
 packages/orchestrator  pipeline state machine, stages, autonomous supervisor, factory CLI
 packages/sentinel      error ingest server, incident store, healing scheduler
-packages/error-sdk     vendored global error handlers (server + browser) for built apps
+packages/stacks        stack definitions, detection, and command execution
+packages/error-sdk     vendored error handlers (Node, Python, browser) + the wire contract
 sentinel.db            incidents and app registrations
 factory.db             the spend ledger
 workspace/             the applications the factory builds

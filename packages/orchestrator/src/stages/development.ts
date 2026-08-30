@@ -9,6 +9,7 @@ function itemPrompt(ctx: Ctx, item: WorkItem): string {
     `Work item ${item.id}: ${item.title}`,
     item.description,
     item.acceptance?.length ? `Acceptance: ${item.acceptance.join("; ")}` : "",
+    ctx.stackContext(),
     `Requirements summary:\n${readIfExists(ctx.appDir, "requirements.md", 6000)}`,
     `Architecture:\n${readIfExists(ctx.appDir, "architecture.md", 6000)}`,
     `When done write .factory/out/dev-report.json with itemId "${item.id}".`,
@@ -84,8 +85,9 @@ export async function runDefectFix(ctx: Ctx, source: StageName, defects: Defect[
   clearOut(ctx.appDir, "dev-report");
   const prompt = [
     `Fix the following ${source} defects in this repository. Address every blocker and major defect; fix minors when cheap.`,
+    ctx.stackContext(),
     JSON.stringify(defects, null, 2),
-    "Add or update tests proving each fix. Run npm test before finishing.",
+    "Add or update tests proving each fix. Run the test command before finishing.",
     'When done write .factory/out/dev-report.json (use itemId "defect-fix").',
   ].join("\n\n");
   await runAgentForJson({

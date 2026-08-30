@@ -19,6 +19,7 @@ uncommitted in the working tree, and do not wait to be asked.
 ## Repo layout
 
 ```
+packages/stacks        stack definitions, detection, command execution, prompt context
 packages/shared        types, config loader, git/GitHub helpers, proc + http utils,
                        spend ledger + budget policy, secrets/redaction, admin token
 packages/agents        Claude Agent SDK runner, session-limit handling, role prompts,
@@ -26,7 +27,7 @@ packages/agents        Claude Agent SDK runner, session-limit handling, role pro
 packages/orchestrator  pipeline state machine, stages, autonomous supervisor, CLI
 packages/sentinel      error ingest server, SQLite incident store, healing scheduler,
                        ingest rate limiter
-packages/error-sdk     vendored global error handlers injected into built apps
+packages/error-sdk     vendored error handlers (Node, Python, browser) + wire contract
 workspace/             generated apps (gitignored; each its own git repo)
 ```
 
@@ -70,6 +71,9 @@ npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
   with consequences (rollback, deploy verdict); `isReachable()` is boot detection.
 - A failure a human must resolve carries `permanent` (`BudgetExceededError`,
   `PreflightError`) so `withStageRetries` parks instead of paying to retry.
+- Never hard-code `npm` (or any other ecosystem's tooling) into a stage, a prompt
+  or the healer. Commands come from `ctx.stack()` / `resolveStack(dir)` and run via
+  `runStackPhase` / `startStackApp`. Prompts get `ctx.stackContext()`.
 - Never add `shell: true` to a spawn. `planSpawn()` resolves npm to
   `node npm-cli.js`; anything else is a real executable. A shell means Node
   concatenates args unescaped, which is command injection waiting for its first

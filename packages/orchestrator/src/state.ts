@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { AppStackSchema } from "@factory/stacks";
 import type { AppMeta, PipelineState, StageName, StageRecord } from "@factory/shared";
 
 export const STAGE_ORDER: StageName[] = [
@@ -95,6 +96,8 @@ export const RequirementsOut = z.object({
 });
 
 export const TasksOut = z.object({
+  /** The stack the architect chose; every later stage runs its commands. */
+  stack: AppStackSchema,
   items: z
     .array(
       z.object({
@@ -143,6 +146,8 @@ export const ValidationOut = z.object({
 export const DevReport = z.object({
   itemId: z.string().optional(),
   done: z.boolean(),
+  /** Deploy wiring only: was error reporting proven to reach the sentinel? */
+  sdkVerified: z.boolean().optional(),
   notes: z.string().default(""),
   filesChanged: z.array(z.string()).optional(),
   crashRepro: z

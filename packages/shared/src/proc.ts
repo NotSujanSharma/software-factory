@@ -35,7 +35,7 @@ const JS_SHIMS: Record<string, string[]> = {
 const resolved = new Map<string, string | null>();
 
 /** Find `cmd` on PATH, honouring PATHEXT on Windows. */
-function which(cmd: string): string | null {
+export function which(cmd: string): string | null {
   const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
   const exts =
     process.platform === "win32"
@@ -45,13 +45,22 @@ function which(cmd: string): string | null {
     for (const ext of ["", ...exts]) {
       const candidate = path.join(dir, cmd + ext);
       try {
-        if (fs.statSync(candidate).isFile()) return candidate;
+        // lstat, not stat: a Windows App Execution Alias - how the Microsoft Store
+        // installs Python - is a reparse point that stat() rejects with EACCES and
+        // existsSync() reports as absent, even though it runs perfectly well.
+        const st = fs.lstatSync(candidate);
+        if (st.isFile() || st.isSymbolicLink()) return candidate;
       } catch {
         /* keep looking */
       }
     }
   }
   return null;
+}
+
+/** Is this executable available on PATH? */
+export function hasExecutable(cmd: string): boolean {
+  return which(cmd) !== null;
 }
 
 /**

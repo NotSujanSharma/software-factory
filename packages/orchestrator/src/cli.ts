@@ -69,7 +69,7 @@ program
   .argument("<app>")
   .action(async (name: string) => {
     const cfg = loadConfig();
-    await preflight(cfg);
+    await preflight(cfg, { appDir: appDirFor(cfg, name) });
     const ctx = openApp(cfg, name);
     rearmState(ctx.state);
     ctx.save();
@@ -93,7 +93,9 @@ program
     // An unattended run has nobody to notice a bad environment, so this matters
     // most here: it is the difference between failing in a second and failing
     // after eight stages of paid work.
-    if (!opts.skipPreflight) await preflight(cfg);
+    if (!opts.skipPreflight) {
+      await preflight(cfg, { appDir: opts.app ? appDirFor(cfg, opts.app) : undefined });
+    }
 
     const prompt = promptWords.join(" ").trim();
     let ctx;
@@ -205,14 +207,16 @@ program
   .command("doctor")
   .option("--no-probe", "skip the live agent-auth check (it costs a fraction of a cent)")
   .option("--fix", "scrub tokens out of any repo config still holding one", false)
+  .option("--app <name>", "also check the toolchain the named app is written in")
   .description("check the environment before it costs you a build")
-  .action(async (opts: { probe: boolean; fix: boolean }) => {
+  .action(async (opts: { probe: boolean; fix: boolean; app?: string }) => {
     const cfg = loadConfig();
     if (opts.fix) {
       const fixed = await fixLeakedCredentials(cfg);
       if (fixed.length) log.ok(`scrubbed tokens from: ${fixed.join(", ")} - now rotate that token`);
     }
-    const results = await runChecks(cfg, { probe: opts.probe });
+    const appDir = opts.app ? appDirFor(cfg, opts.app) : undefined;
+    const results = await runChecks(cfg, { probe: opts.probe, appDir });
     console.log(renderChecks(results));
 
     const failed = results.filter((r) => r.status === "fail").length;
@@ -298,8 +302,9 @@ program
       role: "developer",
       prompt: [
         "Work item DEMO-BUG: introduce ONE realistic regression bug for a self-healing demo.",
-        "Pick an existing endpoint handler and weaken it the way a rushed commit would (remove a null/undefined check, mis-handle a missing field, index into possibly-empty data) so that ONE specific HTTP request causes an unhandled exception at runtime.",
-        "Do NOT modify or delete tests, and the existing npm test suite must still pass (the bug must live in a path the tests do not cover).",
+        ctx.stackContext(),
+        "Pick an existing endpoint handler and weaken it the way a rushed commit would (remove a null check, mis-handle a missing field, index into possibly-empty data) so that ONE specific HTTP request causes an unhandled exception at runtime.",
+        "Do NOT modify or delete tests, and the existing test suite must still pass (the bug must live in a path the tests do not cover).",
         'Write .factory/out/dev-report.json including "crashRepro": {"method": "GET or POST", "path": "/exact/path?with=args", "body": <json or null>} describing the exact request that triggers the crash.',
       ].join("\n"),
       cwd: ctx.appDir,

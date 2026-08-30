@@ -88,3 +88,83 @@ test("app registration round-trips (deploy's offline fallback path)", async () =
   assert.equal(getApp("app-x")!.port, 5101);
   assert.equal(getApp("app-x")!.repoFull, null);
 });
+
+// ---------- fingerprinting across languages ----------
+// Dedup is what stops one bug becoming two healing agents. It has to work for
+// whatever the app was written in, not just for V8 stack traces.
+
+const PY_TRACE = [
+  "Traceback (most recent call last):",
+  '  File "/app/routes/todos.py", line 42, in get_todo',
+  "    return items[index]",
+  '  File "/usr/lib/python3.12/site-packages/flask/app.py", line 900, in dispatch',
+  "    rv = self.handle(req)",
+  "IndexError: list index out of range",
+].join("\n");
+
+const GO_TRACE = [
+  "panic: runtime error: index out of range [3] with length 2",
+  "goroutine 7 [running]:",
+  "main.getTodo(0xc000188000)",
+  "\t/app/handlers/todos.go:58 +0x1d",
+  "net/http.HandlerFunc.ServeHTTP(0x0)",
+  "\t/usr/local/go/src/net/http/server.go:2136 +0x2f",
+].join("\n");
+
+const JVM_TRACE = [
+  "java.lang.NullPointerException: Cannot invoke String.length()",
+  "\tat com.example.todo.TodoService.rename(TodoService.java:81)",
+  "\tat com.example.todo.TodoController.patch(TodoController.java:44)",
+  "\tat org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1071)",
+].join("\n");
+
+const RUBY_TRACE = [
+  "NoMethodError: undefined method `title' for nil:NilClass",
+  "\tfrom /app/services/todo_service.rb:27:in `rename'",
+  "\tfrom /app/controllers/todos_controller.rb:15:in `update'",
+].join("\n");
+
+test("a python traceback yields app frames and skips site-packages", () => {
+  const frames = topFrames(PY_TRACE);
+  assert.ok(frames.length > 0, "expected python frames");
+  assert.equal(frames[0], "get_todo@routes/todos.py");
+  assert.ok(!frames.some((f) => f.includes("flask")), `site-packages leaked in: ${frames.join(", ")}`);
+});
+
+test("a go panic yields app frames and skips the go runtime", () => {
+  const frames = topFrames(GO_TRACE);
+  assert.ok(frames.some((f) => f.includes("todos.go")), frames.join(", "));
+  assert.ok(!frames.some((f) => f.includes("server.go")), `go runtime leaked in: ${frames.join(", ")}`);
+});
+
+test("a jvm trace yields app frames and skips the framework", () => {
+  const frames = topFrames(JVM_TRACE);
+  assert.ok(frames.some((f) => f.includes("TodoService.java")), frames.join(", "));
+  assert.ok(!frames.some((f) => f.includes("DispatcherServlet")), `spring leaked in: ${frames.join(", ")}`);
+});
+
+test("a ruby trace yields app frames", () => {
+  const frames = topFrames(RUBY_TRACE);
+  assert.ok(frames.some((f) => f.includes("todo_service.rb")), frames.join(", "));
+});
+
+test("the same non-JS error twice is still one incident", () => {
+  const event = { ...makeEvent("list index out of range", PY_TRACE), type: "IndexError" };
+  const first = recordEvent(fingerprint(event), event);
+  const second = recordEvent(fingerprint(event), event);
+  assert.equal(second.id, first.id, "a python error must deduplicate like a JS one");
+  assert.equal(second.count, 2);
+});
+
+test("different bugs in the same language stay separate incidents", () => {
+  const a = { ...makeEvent("index out of range", GO_TRACE), type: "panic" };
+  const other = GO_TRACE.replace("todos.go:58", "users.go:12").replace("main.getTodo", "main.getUser");
+  const b = { ...makeEvent("index out of range", other), type: "panic" };
+  assert.notEqual(fingerprint(a), fingerprint(b), "different frames must fingerprint differently");
+});
+
+test("a fix that moves code down a few lines does not look like a new bug", () => {
+  const before = { ...makeEvent("boom", PY_TRACE), type: "IndexError" };
+  const after = { ...makeEvent("boom", PY_TRACE.replace("line 42", "line 57")), type: "IndexError" };
+  assert.equal(fingerprint(before), fingerprint(after), "line numbers must not be part of the fingerprint");
+});

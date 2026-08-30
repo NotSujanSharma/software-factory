@@ -14,6 +14,7 @@ import {
   run,
   spawnDetached,
 } from "@factory/shared";
+import { resolveStack, runStackPhase, startStackApp } from "@factory/stacks";
 import type { FactoryConfig, Incident } from "@factory/shared";
 import { claimIncident, getApp, listIncidents, setIncident, statusChangedAt, type AppRow } from "./db.ts";
 import { healIncident } from "./healer.ts";
@@ -199,7 +200,12 @@ export async function redeployApp(app: AppRow): Promise<void> {
     await git(app.dir, "checkout", "main");
     await git(app.dir, "pull", "origin", "main");
   }
-  await run("npm", ["install", "--no-audit", "--no-fund"], { cwd: app.dir, timeoutMs: 180000 });
+  const stack = resolveStack(app.dir);
+  await runStackPhase(cfg, stack, "install", { cwd: app.dir, port: app.port, timeoutMs: 300_000 });
+  const build = await runStackPhase(cfg, stack, "build", { cwd: app.dir, port: app.port, timeoutMs: 600_000 });
+  if (build && build.code !== 0) {
+    log.error(`${app.name}: build failed after redeploy - ${(build.stderr || build.stdout).slice(-300)}`);
+  }
 
   const runFile = path.join(app.dir, ".factory", "run.json");
   if (fs.existsSync(runFile)) {
@@ -210,10 +216,10 @@ export async function redeployApp(app: AppRow): Promise<void> {
   }
   await new Promise((r) => setTimeout(r, 1500));
   const sha = (await gitTry(app.dir, "rev-parse", "HEAD")) ?? "";
-  const pid = spawnDetached("npm", ["start"], {
+  const pid = startStackApp(cfg, stack, {
     cwd: app.dir,
+    port: app.port,
     env: {
-      PORT: String(app.port),
       FACTORY_APP_ID: app.appId,
       SENTINEL_URL: cfg.sentinel.url,
       FACTORY_RELEASE: sha,
