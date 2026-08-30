@@ -53,13 +53,6 @@ export async function ensureGithubRepo(owner: string, name: string, isPrivate: b
   return gh<RepoInfo>("POST", `/orgs/${realOwner}/repos`, { name, private: isPrivate, auto_init: false });
 }
 
-/** Clone URL with embedded token for push (never log this). */
-export function authedRemote(cloneUrl: string): string {
-  const token = githubToken();
-  if (!token) return cloneUrl;
-  return cloneUrl.replace("https://", `https://x-access-token:${token}@`);
-}
-
 export interface PrInfo {
   number: number;
   html_url: string;

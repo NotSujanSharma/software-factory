@@ -42,6 +42,7 @@ npm test                                # tsx --test tests/*.test.ts
 npm run factory -- auto "<prompt>"      # unattended build -> heal -> evolve
 npm run factory -- sentinel start       # ingest + scheduler + dashboard on :4600
 npm run factory -- apps | status <app> | stop <app>
+npm run factory -- doctor [--no-probe] [--fix]          # environment preflight
 npm run factory -- cost [--app <name>] [--recent <n>]   # spend + budget headroom
 npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
 ```
@@ -62,6 +63,13 @@ npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
   `BudgetExceededError` does) so the supervisor does not retry it.
 - Never write a secret into `.factory/state.json` — it lives in the generated
   app's git repo. Ingest keys are read from the sentinel store at process start.
+- Never put a token in a URL. `remoteUrl()` gives the username-only form and
+  `gitAuthEnv()` supplies the secret to the git child; `git()`/`gitTry()`/
+  `gitClone()` already carry it.
+- "Is it listening" is not "is it healthy". Use `verifyHealthy()` for any decision
+  with consequences (rollback, deploy verdict); `isReachable()` is boot detection.
+- A failure a human must resolve carries `permanent` (`BudgetExceededError`,
+  `PreflightError`) so `withStageRetries` parks instead of paying to retry.
 
 ## Writing files in this repo
 

@@ -4,6 +4,7 @@ export * from "./log.ts";
 export * from "./proc.ts";
 export * from "./http.ts";
 export * from "./git.ts";
+export * from "./gitauth.ts";
 export * from "./github.ts";
 export * from "./ledger.ts";
 export * from "./budget.ts";

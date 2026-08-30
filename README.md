@@ -14,7 +14,8 @@ A multi-agent framework that builds applications from a prompt, then keeps them 
 
 1. `npm install`
 2. Auth for agents: existing Claude Code login is used automatically (or set `ANTHROPIC_API_KEY`).
-3. `GITHUB_TOKEN` env var with `repo` scope (optional - without it everything runs local-only and healing pushes local branches instead of PRs).
+3. `GITHUB_TOKEN` env var with `repo` scope (optional - without it everything runs local-only and healing pushes local branches instead of PRs). It is never written to disk: remotes store `https://x-access-token@github.com/...` and the token is supplied per-command through `GIT_ASKPASS`.
+   If you ran an earlier version, `factory doctor --fix` scrubs tokens out of existing repos - then rotate that token, because it has been sitting in a file.
 4. Tune `factory.config.json` (model, iteration limits, concurrency caps, ports, approvals).
 
 ## Usage
@@ -31,6 +32,7 @@ npm run factory -- sentinel start    # error ingest + healing scheduler + dashbo
 npm run factory -- demo-error <app>  # plant a realistic bug and trigger it twice (healing e2e demo)
 npm run factory -- evolve <app>      # review + implement improvement proposals
 npm run factory -- stop <app>        # stop a running app
+npm run factory -- doctor            # check the environment before it costs you a build
 npm run factory -- cost              # spend ledger + remaining budget headroom
 npm run factory -- rotate-key <app>  # issue a new ingest key for an app
 npm test                             # framework unit tests
@@ -171,6 +173,50 @@ inside. Reaching that endpoint has to be a privilege, not a default.
 - **Credentials are redacted** from agent logs, which record every tool call
   verbatim.
 
+## Preflight
+
+A build spends real money before it reaches the deploy stage, so everything
+checkable in a second is checked in the first second. `build`, `resume`, `auto`
+and `sentinel start` all run preflight automatically; `--skip-preflight` opts out.
+
+```bash
+npm run factory -- doctor              # full check, including a live agent-auth probe
+npm run factory -- doctor --no-probe   # skip the probe (it costs a fraction of a cent)
+npm run factory -- doctor --fix        # scrub tokens out of any repo config holding one
+```
+
+It checks Node and git and npm, workspace writability and free disk, GitHub token
+validity and scopes, port availability, config coherence, remaining budget, and
+whether any repo is still storing a credential. A **failure aborts**; a warning is
+printed and the run continues, because a missing GitHub token is a smaller world
+rather than a broken one.
+
+The check that earns its keep is the last one: it runs a one-word agent query and
+reads the answer. That is the only honest way to know the agents can authenticate,
+and this project has already lost a full unattended run to finding out at stage
+eight that the session had logged out - then retrying it five times, because
+nothing distinguished "not logged in" from "did not converge". A failed preflight
+is now marked `permanent`, and the supervisor does not retry those.
+
+## Health checks
+
+The post-heal rollback is only as good as its definition of healthy, and "answered
+an HTTP request" is not one. An app returning 500 to every route is listening
+perfectly and completely broken - and since a dead app reports no further errors,
+nothing would ever heal it. So:
+
+- Paths in `health.paths` are probed in order. A 404 moves on, because an API-only
+  app legitimately has no route at `/`; a status at or above
+  `health.unhealthyStatusFrom` (500) is a failure.
+- `health.stableChecks` consecutive passes, a second apart, are required. One
+  successful probe would let an app that boots, answers once and dies pass.
+- If every path 404s, the server is still answering, which is the best evidence
+  available without a health endpoint. The deploy stage asks the app to expose
+  `GET /health`, so there usually is one.
+
+`isReachable()` still exists for boot detection only - it answers "is anything
+listening", which is a different question and must never decide a rollback.
+
 ## Guarantees & guardrails
 
 - One incident per error fingerprint; healing claims are CAS-transactional - duplicate agents for the same error are impossible.
@@ -180,6 +226,9 @@ inside. Reaching that endpoint has to be a privilege, not a default.
 - Every agent run is metered, and gated against a spend ceiling before it starts.
 - Every agent tool call passes a guard that refuses the known-catastrophic moves.
 - `/ingest` is authenticated per app and rate limited; registration needs the admin token.
+- No credential is ever written to disk: remotes carry a username, never a token.
+- The environment is checked before a run spends anything, and a failed check is
+  permanent rather than retried.
 
 ## Layout
 

@@ -10,7 +10,7 @@ import {
   git,
   gitTry,
   githubToken,
-  authedRemote,
+  remoteUrl,
   AUTONOMOUS_ENV,
   budgetReport,
   formatUsd,
@@ -23,6 +23,7 @@ import type { WorkItem } from "@factory/shared";
 import { appDirFor, createApp, openApp, runPipeline } from "./pipeline.ts";
 import { outPath, clearOut, rearmState, DevReport, EvolutionOut } from "./state.ts";
 import { runAutonomous } from "./autonomous.ts";
+import { fixLeakedCredentials, preflight, renderChecks, runChecks } from "./preflight.ts";
 import { developmentStage } from "./stages/development.ts";
 import { gateStage } from "./stages/gates.ts";
 import { deployStage, startApp, stopApp } from "./stages/deploy.ts";
@@ -38,7 +39,7 @@ function slug(text: string): string {
 
 async function pushMain(appDir: string, repoFull?: string): Promise<void> {
   if (repoFull && githubToken()) {
-    await gitTry(appDir, "remote", "set-url", "origin", authedRemote(`https://github.com/${repoFull}.git`));
+    await gitTry(appDir, "remote", "set-url", "origin", remoteUrl(`https://github.com/${repoFull}.git`));
     await git(appDir, "push", "origin", "main");
   }
 }
@@ -58,6 +59,7 @@ program
       extra = await rl.question("Any constraints, preferences or details to add? (enter to skip)\n> ");
       rl.close();
     }
+    await preflight(cfg);
     const ctx = await createApp(cfg, name, prompt);
     await runPipeline(ctx, extra.trim());
   });
@@ -66,7 +68,9 @@ program
   .command("resume")
   .argument("<app>")
   .action(async (name: string) => {
-    const ctx = openApp(loadConfig(), name);
+    const cfg = loadConfig();
+    await preflight(cfg);
+    const ctx = openApp(cfg, name);
     rearmState(ctx.state);
     ctx.save();
     await runPipeline(ctx);
@@ -78,12 +82,18 @@ program
   .option("--app <name>", "run against an existing app instead of creating one")
   .option("--name <name>", "app name for a new build (defaults to a slug of the prompt)")
   .option("--build-only", "stop once the app is deployed; skip the evolution loop", false)
+  .option("--skip-preflight", "start without checking the environment first", false)
   .description("build, deploy, heal and evolve with no human involvement")
-  .action(async (promptWords: string[], opts: { app?: string; name?: string; buildOnly: boolean }) => {
+  .action(
+    async (promptWords: string[], opts: { app?: string; name?: string; buildOnly: boolean; skipPreflight: boolean }) => {
     // `auto` means autonomous whatever the config file says. Set before loadConfig
     // so every package - and every process spawned from here - sees the same thing.
     process.env[AUTONOMOUS_ENV] = "1";
     const cfg = loadConfig();
+    // An unattended run has nobody to notice a bad environment, so this matters
+    // most here: it is the difference between failing in a second and failing
+    // after eight stages of paid work.
+    if (!opts.skipPreflight) await preflight(cfg);
 
     const prompt = promptWords.join(" ").trim();
     let ctx;
@@ -98,8 +108,9 @@ program
         : await createApp(cfg, name, prompt);
     }
 
-    await runAutonomous(ctx, { buildOnly: opts.buildOnly });
-  });
+      await runAutonomous(ctx, { buildOnly: opts.buildOnly });
+    },
+  );
 
 program
   .command("status")
@@ -139,8 +150,11 @@ program
 program
   .command("sentinel")
   .argument("<action>", "start")
-  .action(async (action: string) => {
+  .option("--skip-preflight", "start without checking the environment first", false)
+  .action(async (action: string, opts: { skipPreflight: boolean }) => {
     if (action !== "start") throw new Error("only: sentinel start");
+    // The sentinel runs healing agents, so it needs the same environment a build does.
+    if (!opts.skipPreflight) await preflight(loadConfig());
     const { startSentinel } = await import("@factory/sentinel");
     startSentinel();
   });
@@ -185,6 +199,33 @@ program
     await pushMain(ctx.appDir, ctx.state.app.repoUrl);
     if (ctx.state.app.port) await startApp(ctx, ctx.state.app.port);
     log.ok(`evolution items shipped: ${chosen.map((p) => p.id).join(", ")}`);
+  });
+
+program
+  .command("doctor")
+  .option("--no-probe", "skip the live agent-auth check (it costs a fraction of a cent)")
+  .option("--fix", "scrub tokens out of any repo config still holding one", false)
+  .description("check the environment before it costs you a build")
+  .action(async (opts: { probe: boolean; fix: boolean }) => {
+    const cfg = loadConfig();
+    if (opts.fix) {
+      const fixed = await fixLeakedCredentials(cfg);
+      if (fixed.length) log.ok(`scrubbed tokens from: ${fixed.join(", ")} - now rotate that token`);
+    }
+    const results = await runChecks(cfg, { probe: opts.probe });
+    console.log(renderChecks(results));
+
+    const failed = results.filter((r) => r.status === "fail").length;
+    const warned = results.filter((r) => r.status === "warn").length;
+    console.log("");
+    if (failed) {
+      log.error(`${failed} check(s) failed, ${warned} warning(s) - a build would not get far`);
+      process.exitCode = 1;
+    } else if (warned) {
+      log.warn(`all critical checks passed, ${warned} warning(s)`);
+    } else {
+      log.ok("all checks passed");
+    }
   });
 
 program

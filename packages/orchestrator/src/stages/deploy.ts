@@ -5,7 +5,6 @@ import { runAgentForJson } from "@factory/agents";
 import { vendorFilePath, browserFilePath, VENDOR_FILE_NAME, BROWSER_FILE_NAME } from "@factory/error-sdk";
 import {
   adminToken,
-  authedRemote,
   commitAll,
   currentSha,
   ensureGithubRepo,
@@ -13,8 +12,11 @@ import {
   gitTry,
   githubToken,
   killTree,
+  remoteUrl,
   run,
+  scrubRemoteCredentials,
   spawnDetached,
+  verifyHealthy,
   waitForHttp,
 } from "@factory/shared";
 import { outPath, clearOut, DevReport } from "../state.ts";
@@ -46,6 +48,9 @@ export async function deployStage(ctx: Ctx): Promise<void> {
       `SECURITY: never render FACTORY_INGEST_KEY or SENTINEL_URL into HTML, a client bundle, or a data- attribute.`,
       `The browser script reports same-origin to /__factory_error and the proxy adds the key server-side.`,
       `If the app is API-only with no HTML, skip steps 3-4 and delete ${BROWSER_FILE_NAME}.`,
+      `5. if the app has no health endpoint, add GET /health returning 200 and {"status":"ok"}.`,
+      `   The self-healing rollback decides whether a merged fix broke the app by calling it,`,
+      `   so it must return 5xx (or fail) when the app cannot serve traffic.`,
       `Do not change any other behavior. Run npm test to confirm nothing broke.`,
       `Write .factory/out/dev-report.json with itemId "DEPLOY-WIRE".`,
     ].join("\n"),
@@ -63,7 +68,9 @@ export async function deployStage(ctx: Ctx): Promise<void> {
     const repo = await ensureGithubRepo(cfg.github.owner, state.app.name, cfg.github.private);
     state.app.repoUrl = repo.full_name;
     await gitTry(appDir, "remote", "remove", "origin");
-    await git(appDir, "remote", "add", "origin", authedRemote(repo.clone_url));
+    await git(appDir, "remote", "add", "origin", remoteUrl(repo.clone_url));
+    // An older run may have left a tokenised URL behind in this repo.
+    if (await scrubRemoteCredentials(appDir)) ctx.log.warn("scrubbed a token out of .git/config");
     await git(appDir, "push", "-u", "origin", "main", "--force-with-lease");
     ctx.log.ok(`pushed to ${repo.html_url}`);
   } else {
@@ -127,7 +134,16 @@ export async function startApp(ctx: Ctx, port: number): Promise<void> {
   });
   fs.writeFileSync(path.join(appDir, ".factory", "run.json"), JSON.stringify({ pid, port }, null, 2));
   await waitForHttp(`http://localhost:${port}/`, 30000);
-  ctx.log.ok(`app ${state.app.name} running on port ${port} (pid ${pid})`);
+
+  // Listening is not the same as working. Warn rather than fail here - the app may
+  // legitimately have no health route yet - but say so plainly, because this is the
+  // same check the post-heal rollback depends on.
+  const health = await verifyHealthy(`http://localhost:${port}`, ctx.cfg.health);
+  if (health.healthy) {
+    ctx.log.ok(`app ${state.app.name} running on port ${port} (pid ${pid}); health: ${health.detail}`);
+  } else {
+    ctx.log.warn(`app ${state.app.name} started on port ${port} (pid ${pid}) but is UNHEALTHY: ${health.detail}`);
+  }
 }
 
 export function stopApp(appDir: string): void {

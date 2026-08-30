@@ -58,6 +58,12 @@ const DEFAULTS: FactoryConfig = {
     maxToolCallsPerRun: 120,
     onDailyExhausted: "wait",
   },
+  health: {
+    paths: ["/health", "/healthz", "/api/health", "/"],
+    unhealthyStatusFrom: 500,
+    timeoutMs: 45_000,
+    stableChecks: 3,
+  },
   sandbox: {
     enabled: true,
     confineToWorkdir: true,

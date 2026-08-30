@@ -22,9 +22,10 @@ const log = makeLogger("autonomous");
 /**
  * Is this failure one that retrying cannot fix?
  *
- * Budget exhaustion is the case that matters today: a ceiling only a human can
- * raise will still be spent on the next attempt, so retrying just burns the
- * remaining headroom. Errors opting in via `permanent` are honoured too.
+ * Two cases matter today. A budget ceiling only a human can raise will still be
+ * spent on the next attempt, so retrying just burns the remaining headroom. A
+ * failed preflight - no login, no disk, an occupied port - is not going to fix
+ * itself between attempts either. Anything else opting in via `permanent` counts.
  */
 function isPermanent(err: unknown): boolean {
   if (err instanceof BudgetExceededError) return true;

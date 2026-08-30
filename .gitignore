@@ -9,3 +9,5 @@ factory.db-*
 watchdog-*.log
 watchdog-*.log.err
 .factory-watchdog.pid
+.factory-askpass.cmd
+.factory-askpass.sh

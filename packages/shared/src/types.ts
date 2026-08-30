@@ -26,6 +26,7 @@ export interface FactoryConfig {
   github: { enabled: boolean; owner: string; private: boolean };
   budget: BudgetConfig;
   sandbox: SandboxConfig;
+  health: HealthConfig;
   limits: {
     qaIterations: number;
     reviewIterations: number;
@@ -167,6 +168,24 @@ export interface RegisteredApp {
   repoUrl?: string;
   port: number;
   startCmd: string;
+}
+
+/**
+ * What counts as a healthy app.
+ *
+ * The post-heal rollback is only as good as this check: if a broken app passes,
+ * a bad fix stays merged and, because a dead app reports no further errors,
+ * nothing will ever heal it.
+ */
+export interface HealthConfig {
+  /** Probed in order. A 404 moves on; an API-only app has no route at `/`. */
+  paths: string[];
+  /** A status at or above this is a failure. 500 by default. */
+  unhealthyStatusFrom: number;
+  /** Total time the app has to become healthy. */
+  timeoutMs: number;
+  /** Consecutive passes, a second apart, required before declaring health. */
+  stableChecks: number;
 }
 
 // ---------- cost control ----------
