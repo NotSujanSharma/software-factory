@@ -221,3 +221,28 @@ test("a stack with no install or build step says so rather than inventing one", 
   assert.equal(describeCommand(stack.commands.install), "(none)");
   assert.match(stackBrief(stack), /\| install \| `\(none\)` \|/);
 });
+
+// ---------- the prompt and the schema must not drift ----------
+
+test("the architect prompt's own example validates against the schema", () => {
+  // The example is what an agent copies. If it does not parse, the most expensive
+  // stage in the pipeline burns a retry before anyone finds out.
+  const md = fs.readFileSync(path.join("packages", "agents", "prompts", "architect.md"), "utf8");
+  const block = md.match(/```json\n([\s\S]*?)```/)?.[1];
+  assert.ok(block, "architect.md should contain a json example");
+
+  const objStart = block.indexOf("{", block.indexOf('"stack"'));
+  let depth = 0;
+  let end = objStart;
+  for (let i = objStart; i < block.length; i++) {
+    if (block[i] === "{") depth++;
+    if (block[i] === "}" && --depth === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+  const example = JSON.parse(block.slice(objStart, end));
+  const parsed = AppStackSchema.parse(example);
+  assert.equal(parsed.errorSdk, "python");
+  assert.ok(parsed.commands.start.includes("${PORT}"), "the example should show the port placeholder");
+});

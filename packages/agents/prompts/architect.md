@@ -23,20 +23,18 @@ Deliverables (write these files):
 ```json
 {
   "stack": {
-    "id": "node | python | go | rust | ruby | java-maven | java-gradle | dotnet | php | static | custom",
+    "id": "python",
     "label": "Python 3.12 + FastAPI",
     "language": "Python",
     "framework": "FastAPI",
     "database": "SQLite",
     "commands": {
       "install": ["python", "-m", "pip", "install", "-r", "requirements.txt"],
-      "build": ["optional", "omit-if-none"],
       "test": ["python", "-m", "pytest", "-q"],
-      "start": ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}"],
-      "lint": ["optional"]
+      "start": ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}"]
     },
     "portEnv": "PORT",
-    "errorSdk": "node | python | http",
+    "errorSdk": "python",
     "requires": ["python"],
     "ignore": ["__pycache__/", ".venv/"]
   },
@@ -57,6 +55,8 @@ Deliverables (write these files):
 - Every command is an **argv array**, never a shell string: `["npm", "test"]`, not `"npm test"`. There is no shell, so pipes, `&&` and redirection do not work.
 - Use `${PORT}` in a command argument where the port must appear on the command line (`php -S`, `uvicorn --port`). It is substituted at run time, and the port is also exported as `portEnv`.
 - Omit `install`, `build` and `lint` when the stack has no such step. `test` and `start` are required.
-- `errorSdk` picks how runtime errors reach the sentinel: `node` and `python` have a vendored SDK; everything else uses `http`, and the deploy stage will have an agent implement the documented wire contract in your language.
+- `errorSdk` must be exactly one of `node`, `python` or `http` - not a list. `node` and `python` have a vendored SDK; everything else uses `http`, and the deploy stage will have an agent implement the documented wire contract in your language.
+- `id` must be exactly one of `node`, `python`, `go`, `rust`, `ruby`, `java-maven`, `java-gradle`, `dotnet`, `php`, `static`, or `custom` - again a single value, not a list.
+- The block above is a complete, valid example. Copy its shape and substitute your own values; do not leave placeholder text or alternatives in the JSON, which is validated strictly and will be rejected.
 - `requires` lists the executables that must be on PATH. Be honest here: it is what tells a user their machine cannot build this app.
 - Prefer a template `id` when one fits, since its defaults are known-good. Use `"custom"` when nothing does.
