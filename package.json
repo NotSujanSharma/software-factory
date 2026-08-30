@@ -1,0 +1,25 @@
+{
+  "name": "self-healing-factory",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "factory": "tsx packages/orchestrator/src/cli.ts",
+    "sentinel": "tsx packages/orchestrator/src/cli.ts sentinel start",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "commander": "^14.0.0",
+    "express": "^5.1.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

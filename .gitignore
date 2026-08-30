@@ -1,0 +1,8 @@
+node_modules/
+workspace/
+*.log
+.env
+sentinel.db
+watchdog-*.log
+watchdog-*.log.err
+.factory-watchdog.pid

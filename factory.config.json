@@ -1,0 +1,33 @@
+{
+  "model": "claude-opus-5",
+  "workspaceDir": "workspace",
+  "sentinel": { "port": 4600, "url": "http://localhost:4600" },
+  "github": { "enabled": true, "owner": "", "private": true },
+  "limits": {
+    "qaIterations": 3,
+    "reviewIterations": 2,
+    "securityIterations": 2,
+    "validationRounds": 2,
+    "devConcurrency": 2,
+    "healConcurrency": 1,
+    "maxHealAttempts": 2
+  },
+  "deploy": { "basePort": 5100 },
+  "approvals": { "autoMergeHealPRs": false, "autoImplementEvolution": false },
+  "autonomous": {
+    "enabled": false,
+    "waitOnLimit": true,
+    "limitBufferMs": 90000,
+    "maxLimitWaitMs": 21600000,
+    "limitFallbackMs": 600000,
+    "maxStageRetries": 5,
+    "stageRetryDelayMs": 60000,
+    "evolutionCycles": 0,
+    "evolutionIntervalMs": 900000,
+    "evolutionMaxPerCycle": 3,
+    "incidentRetryCooldownMs": 1800000,
+    "maxIncidentRearms": 3,
+    "healthCheckMs": 45000,
+    "rollbackOnUnhealthy": true
+  }
+}
