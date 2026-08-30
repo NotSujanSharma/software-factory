@@ -70,6 +70,10 @@ npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
   with consequences (rollback, deploy verdict); `isReachable()` is boot detection.
 - A failure a human must resolve carries `permanent` (`BudgetExceededError`,
   `PreflightError`) so `withStageRetries` parks instead of paying to retry.
+- Never add `shell: true` to a spawn. `planSpawn()` resolves npm to
+  `node npm-cli.js`; anything else is a real executable. A shell means Node
+  concatenates args unescaped, which is command injection waiting for its first
+  untrusted string.
 
 ## Writing files in this repo
 

@@ -11,6 +11,7 @@
  */
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -82,19 +83,6 @@ function portFree(port: number, host = "127.0.0.1"): Promise<boolean> {
   });
 }
 
-function inUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = net.connect({ port, host: "127.0.0.1" });
-    const done = (v: boolean) => {
-      sock.destroy();
-      resolve(v);
-    };
-    sock.once("connect", () => done(true));
-    sock.once("error", () => done(false));
-    setTimeout(() => done(false), 1000);
-  });
-}
-
 async function checkSentinelPort(cfg: FactoryConfig): Promise<CheckResult> {
   const { port } = cfg.sentinel;
   if (await portFree(port, cfg.sentinel.host)) return pass("sentinel port", `:${port} is free`);
@@ -142,6 +130,35 @@ async function checkDisk(cfg: FactoryConfig): Promise<CheckResult> {
     return pass("disk", `${freeGb.toFixed(1)} GB free`);
   } catch {
     return pass("disk", "not measurable on this platform");
+  }
+}
+
+/**
+ * Can npm actually install into a fresh project?
+ *
+ * Every deploy and every heal runs `npm install`, so a broken npm environment is a
+ * hard blocker - but it only shows up deep inside a stage that has already cost
+ * money. A trivial install in a temp directory costs about a second and catches a
+ * bad registry, a dead proxy, a corrupted cache, or config that a nested npm
+ * refuses (an `allow-scripts` entry in `.npmrc` used to fail exactly this way).
+ */
+async function checkNpmInstall(): Promise<CheckResult> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "factory-npm-probe-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "factory-npm-probe", version: "1.0.0", private: true }),
+    );
+    const res = await run("npm", ["install", "--no-audit", "--no-fund"], { cwd: dir, timeoutMs: 120_000 });
+    if (res.code !== 0) {
+      const reason = (res.stderr || res.stdout).trim().split("\n").slice(0, 2).join(" ").slice(0, 200);
+      return fail("npm install", reason || `exited ${res.code}`, "Every deploy and heal needs this to work.");
+    }
+    return pass("npm install", "works in a clean project");
+  } catch (err) {
+    return fail("npm install", String(err).slice(0, 200));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -297,6 +314,7 @@ export async function runChecks(cfg: FactoryConfig, opts: PreflightOptions = {})
     checkNode(),
     await checkCommand("git", ["--version"]),
     await checkCommand("npm", ["--version"]),
+    await checkNpmInstall(),
     checkWorkspace(cfg),
     await checkDisk(cfg),
     await checkGitIdentity(),

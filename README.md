@@ -149,6 +149,32 @@ Patterns added in `sandbox.denyCommands` are **added to** the built-in list, nev
 substituted for it: adding one project rule must not silently drop fifteen safety
 rules.
 
+## Subprocesses
+
+Nothing is spawned through a shell.
+
+The reason it used to be is Windows: `npm` is `npm.cmd`, a batch file, and
+`CreateProcess` cannot execute one. Node's historic answer was `shell: true`, which
+concatenates the argument array into a single command line **without escaping
+anything** - the behaviour Node now warns about as DEP0190, and which turns any
+argument containing `&`, `|` or `^` into command injection. Every argument in this
+codebase is internal today, but "no untrusted string ever reaches this" is a
+property that stops being true quietly.
+
+So `npm` is resolved to the JavaScript file behind the shim and run as
+`node .../npm-cli.js ...`. Node is a real executable, the argument array is passed
+straight through, and there is no command line to escape out of. If the entry point
+cannot be found, the fallback validates arguments and refuses any that carry shell
+syntax.
+
+Spawned npm processes also get a **clean environment**. When npm runs a script it
+exports its resolved config as `npm_config_*`, and a nested npm reads those back as
+though they were command-line flags - so a setting that is perfectly legal in an
+`.npmrc` can make every nested `npm install` fail (`allow-scripts` does exactly
+this, with `EALLOWSCRIPTS`). npm's own projection is stripped when npm is what
+launched us, so a nested install reads its `.npmrc` fresh, like a person running it.
+Variables you exported yourself are left alone.
+
 ## Error-ingest security
 
 The sentinel decides which directory a healing agent clones and runs `npm test`
@@ -185,9 +211,10 @@ npm run factory -- doctor --no-probe   # skip the probe (it costs a fraction of 
 npm run factory -- doctor --fix        # scrub tokens out of any repo config holding one
 ```
 
-It checks Node and git and npm, workspace writability and free disk, GitHub token
-validity and scopes, port availability, config coherence, remaining budget, and
-whether any repo is still storing a credential. A **failure aborts**; a warning is
+It checks Node, git and npm, that `npm install` actually works in a clean project,
+workspace writability and free disk, GitHub token validity and scopes, port
+availability, config coherence, remaining budget, and whether any repo is still
+storing a credential. A **failure aborts**; a warning is
 printed and the run continues, because a missing GitHub token is a smaller world
 rather than a broken one.
 
