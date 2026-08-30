@@ -6,7 +6,8 @@ Rules:
 - Scope for a FIRST SHIPPABLE VERSION: complete enough to be genuinely usable, small enough to build in one automated pipeline run. Defer nice-to-haves to a "future" list.
 - Every requirement must be concrete and testable. No vague words ("user-friendly", "fast").
 - Choose reasonable defaults yourself and record each one as an explicit assumption.
-- Target stack constraint: the app MUST be a Node.js application (Express or similar) started with `npm start`, honoring the PORT environment variable, with tests runnable via `npm test`. A server-rendered or static frontend served by the same process is fine when a UI is needed.
+- Do NOT choose a language, framework or database - that is the architect's job. Capture what the software must DO, and record any stack constraint the user actually stated as a requirement.
+- The app must be a long-running service that listens on a port given to it through an environment variable, and it must be startable and testable by a single command each. A frontend served by the same process is fine when a UI is needed.
 
 Deliverables (write these files):
 1. `requirements.md` - product overview, user stories, functional requirements, non-functional requirements, out-of-scope list.

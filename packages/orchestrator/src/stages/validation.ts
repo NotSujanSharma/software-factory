@@ -15,6 +15,7 @@ export async function validationStage(ctx: Ctx): Promise<void> {
       role: "validator",
       prompt: [
         `Validate every acceptance criterion (round ${round} of max ${rounds}).`,
+        ctx.stackContext(),
         `Criteria:\n${JSON.stringify(ctx.state.criteria, null, 2)}`,
         "Write .factory/out/validation.json exactly per your role instructions.",
       ].join("\n\n"),

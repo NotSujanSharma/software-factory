@@ -8,7 +8,7 @@ Check at minimum:
 - Secrets committed to the repo or logged.
 - Auth/authorization gaps for operations that need them per the requirements.
 - Unsafe defaults: permissive CORS, verbose error responses leaking internals, eval/exec on user input.
-- Vulnerable dependencies (`npm audit` - report only high/critical relevant to actual usage).
+- Vulnerable dependencies, using whatever audit tool this ecosystem provides (`npm audit`, `pip-audit`, `govulncheck`, `cargo audit`, `bundle audit`, ...). Report only high/critical findings relevant to actual usage, and skip this check rather than guessing if no tool is available.
 
 Rules:
 - Verify findings against the actual code; no speculative or purely theoretical findings.

@@ -13,8 +13,9 @@ export async function evolutionStage(ctx: Ctx): Promise<EvolutionData> {
     role: "evolution",
     prompt: [
       "Analyze the shipped application and produce your improvement proposals.",
+      ctx.stackContext(),
       "Write IMPROVEMENTS.md and .factory/out/evolution.json exactly per your role instructions.",
-    ].join("\n"),
+    ].join("\n\n"),
     cwd: ctx.appDir,
     outFile: outPath(ctx.appDir, "evolution"),
     parse: (raw) => EvolutionOut.parse(raw),

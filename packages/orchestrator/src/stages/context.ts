@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import { resolveStack, stackBrief, type AppStack } from "@factory/stacks";
 import type { FactoryConfig, PipelineState, StageName } from "@factory/shared";
 import { makeLogger, type Logger } from "@factory/shared";
 import { logsDir, saveState, stageRec } from "../state.ts";
@@ -11,6 +12,10 @@ export interface Ctx {
   log: Logger;
   save(): void;
   agentLog(stage: string): string;
+  /** The app's stack, re-read each time so an agent's edits take effect. */
+  stack(): AppStack;
+  /** The stack block appended to agent prompts. */
+  stackContext(): string;
 }
 
 export function makeCtx(cfg: FactoryConfig, state: PipelineState, appDir: string): Ctx {
@@ -22,6 +27,8 @@ export function makeCtx(cfg: FactoryConfig, state: PipelineState, appDir: string
     save: () => saveState(appDir, state),
     agentLog: (stage: string) =>
       path.join(logsDir(appDir), `${stage}-${Date.now()}.log`),
+    stack: () => resolveStack(appDir),
+    stackContext: () => stackBrief(resolveStack(appDir)),
   };
 }
 

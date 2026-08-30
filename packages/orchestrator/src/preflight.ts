@@ -28,6 +28,7 @@ import {
   type FactoryConfig,
 } from "@factory/shared";
 import { isLimitMessage } from "@factory/agents";
+import { describeCommand, loadStack, missingTools } from "@factory/stacks";
 
 const log = makeLogger("preflight");
 
@@ -300,11 +301,37 @@ export async function probeAgentAuth(cfg: FactoryConfig): Promise<CheckResult> {
   }
 }
 
+/**
+ * Does the machine have what this app is written in?
+ *
+ * Only meaningful once an app exists and has declared a stack; a fresh build has
+ * not chosen one yet, and the architect is shown what is installed before it does.
+ */
+function checkAppStack(appDir?: string): CheckResult[] {
+  if (!appDir) return [];
+  const stack = loadStack(appDir);
+  if (!stack) return [];
+
+  const missing = missingTools(stack);
+  if (missing.length) {
+    return [
+      fail(
+        "app toolchain",
+        `${stack.label} needs ${missing.join(", ")}, which are not installed`,
+        `Install them, or the app cannot be built, tested, run or healed.`,
+      ),
+    ];
+  }
+  return [pass("app toolchain", `${stack.label}; start: ${describeCommand(stack.commands.start)}`)];
+}
+
 export interface PreflightOptions {
   /** Spend a fraction of a cent proving the agents can actually authenticate. */
   probe?: boolean;
   /** Rewrite any remote still holding a token. */
   fix?: boolean;
+  /** An existing app whose declared stack should also be checked. */
+  appDir?: string;
 }
 
 export async function runChecks(cfg: FactoryConfig, opts: PreflightOptions = {}): Promise<CheckResult[]> {
@@ -323,6 +350,7 @@ export async function runChecks(cfg: FactoryConfig, opts: PreflightOptions = {})
     await checkSentinelPort(cfg),
     await checkAppPorts(cfg),
     ...checkConfig(cfg),
+    ...checkAppStack(opts.appDir),
     checkBudgetHeadroom(cfg),
   ];
   if (opts.probe !== false) results.push(await probeAgentAuth(cfg));

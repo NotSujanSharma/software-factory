@@ -28,7 +28,12 @@ export async function createApp(cfg: FactoryConfig, name: string, prompt: string
   const state = newState(app);
   saveState(dir, state);
   await ensureRepo(dir);
-  fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules/\n.factory/logs/\n.factory/app.log\n.factory/run.json\n");
+  // The stack is not chosen until the architecture stage, which appends its own
+  // build artefacts to this file once it knows what they are.
+  fs.writeFileSync(
+    path.join(dir, ".gitignore"),
+    [".factory/logs/", ".factory/app.log", ".factory/run.json", ".env", ""].join("\n"),
+  );
   await commitAll(dir, "chore: factory pipeline initialized");
   return makeCtx(cfg, state, dir);
 }

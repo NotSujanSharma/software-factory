@@ -32,8 +32,9 @@ export async function gateStage(ctx: Ctx, name: "qa" | "review" | "security"): P
       role: spec.role,
       prompt: [
         `Run your ${name} pass on this repository (pass ${i} of max ${max}).`,
+        ctx.stackContext(),
         `Write your verdict to .factory/out/${spec.outName}.json exactly per your role instructions.`,
-      ].join("\n"),
+      ].join("\n\n"),
       cwd: ctx.appDir,
       outFile: outPath(ctx.appDir, spec.outName),
       parse: (raw) => GateOut.parse(raw),

@@ -3,14 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { runAgentForJson } from "@factory/agents";
+import { describeCommand, resolveStack, runStackPhase, stackBrief } from "@factory/stacks";
 import {
   createPR,
   git,
   gitClone,
   githubToken,
+  loadConfig,
   makeLogger,
   remoteUrl,
-  run,
 } from "@factory/shared";
 import type { Incident } from "@factory/shared";
 import { setIncident, type AppRow } from "./db.ts";
@@ -43,6 +44,9 @@ export async function healIncident(incident: Incident, app: AppRow): Promise<voi
     await git(work, "checkout", "-b", branch);
     fs.mkdirSync(path.join(work, ".factory", "out"), { recursive: true });
 
+    // Read the stack from the clone: it travels with the repo, so the healer knows
+    // how to test whatever language this app happens to be written in.
+    const stack = resolveStack(work);
     const priorContext = incident.lastNote ? `\nPrior history: ${incident.lastNote}` : "";
     const { data } = await runAgentForJson({
       role: "healer",
@@ -52,6 +56,7 @@ export async function healIncident(incident: Incident, app: AppRow): Promise<voi
         `Stack:\n${incident.sampleEvent.stack ?? "(none)"}`,
         `Request context: ${JSON.stringify(incident.sampleEvent.context ?? {}, null, 2)}`,
         `Release: ${incident.sampleEvent.release ?? "unknown"}`,
+        stackBrief(stack),
         "Follow your role procedure. Write .factory/out/heal.json when done.",
       ].join("\n\n"),
       cwd: work,
@@ -71,9 +76,14 @@ export async function healIncident(incident: Incident, app: AppRow): Promise<voi
     }
 
     // Verify the suite really passes before shipping the fix.
-    const test = await run("npm", ["test"], { cwd: work, timeoutMs: 300000 });
-    if (test.code !== 0) {
-      throw new Error(`healer claimed fixed but npm test exits ${test.code}:\n${(test.stderr || test.stdout).slice(-1500)}`);
+    const cfg = loadConfig();
+    await runStackPhase(cfg, stack, "install", { cwd: work, timeoutMs: 300_000 });
+    const test = await runStackPhase(cfg, stack, "test", { cwd: work, timeoutMs: 600_000 });
+    if (test && test.code !== 0) {
+      throw new Error(
+        `healer claimed fixed but \`${describeCommand(stack.commands.test)}\` exits ${test.code}:\n` +
+          (test.stderr || test.stdout).slice(-1500),
+      );
     }
 
     await git(work, "add", "-A");
