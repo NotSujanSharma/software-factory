@@ -14,6 +14,7 @@ const state = {
   appId: null,
   sentinelUrl: null,
   release: null,
+  ingestKey: null,
   installed: false,
 };
 
@@ -22,6 +23,9 @@ function init(opts) {
   state.appId = opts.appId || process.env.FACTORY_APP_ID || null;
   state.sentinelUrl = (opts.sentinelUrl || process.env.SENTINEL_URL || "").replace(/\/$/, "") || null;
   state.release = opts.release || process.env.FACTORY_RELEASE || null;
+  // Shared secret the sentinel authenticates this app with. Server-side only:
+  // it must never be rendered into a page or handed to the browser bundle.
+  state.ingestKey = opts.ingestKey || process.env.FACTORY_INGEST_KEY || null;
   if (state.installed) return;
   state.installed = true;
 
@@ -49,9 +53,11 @@ function capture(err, context) {
       context: context || {},
       timestamp: new Date().toISOString(),
     };
+    const headers = { "Content-Type": "application/json" };
+    if (state.ingestKey) headers["x-factory-key"] = state.ingestKey;
     fetch(state.sentinelUrl + "/ingest", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(event),
     }).catch(() => {});
   } catch {
@@ -84,4 +90,29 @@ function safeBody(req) {
   }
 }
 
-module.exports = { init, capture, expressErrorHandler };
+/**
+ * Express handler for POST /__factory_error: forwards a browser-reported error to
+ * the sentinel, adding this app's ingest key server-side.
+ *
+ * The browser bundle deliberately has no key of its own - anything shipped to a
+ * page is public - so this route is how browser errors get authenticated. Mount it
+ * with a JSON body parser:
+ *
+ *   app.post("/__factory_error", express.json({ limit: "64kb" }), factoryErrors.browserProxy());
+ */
+function browserProxy() {
+  return function factoryBrowserProxy(req, res) {
+    try {
+      const b = (req && req.body) || {};
+      capture(
+        { name: b.type || "Error", message: String(b.message || "unknown"), stack: b.stack },
+        Object.assign({ origin: "browser" }, b.context || {}),
+      );
+    } catch {
+      /* never let telemetry break the route */
+    }
+    res.status(204).end();
+  };
+}
+
+module.exports = { init, capture, expressErrorHandler, browserProxy };

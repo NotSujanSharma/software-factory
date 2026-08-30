@@ -1,8 +1,8 @@
 import { runAgentForJson } from "@factory/agents";
-import type { Defect, WorkItem } from "@factory/shared";
+import type { Defect, StageName, WorkItem } from "@factory/shared";
 import { commitAll } from "@factory/shared";
 import { outPath, clearOut, DevReport } from "../state.ts";
-import { beginStage, endStage, readIfExists, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, readIfExists, type Ctx } from "./context.ts";
 
 function itemPrompt(ctx: Ctx, item: WorkItem): string {
   return [
@@ -30,6 +30,7 @@ async function runDevItem(ctx: Ctx, item: WorkItem): Promise<boolean> {
       parse: (raw) => DevReport.parse(raw),
       logFile: ctx.agentLog(`dev-${item.id}`),
       scope: `dev:${item.id}`,
+      ...agentMeta(ctx, "development"),
     });
     item.status = data.done ? "done" : "failed";
     ctx.save();
@@ -79,7 +80,7 @@ export async function developmentStage(ctx: Ctx): Promise<void> {
 }
 
 /** Run a developer agent to fix a batch of defects (used by QA/review/security/validation loops). */
-export async function runDefectFix(ctx: Ctx, source: string, defects: Defect[]): Promise<void> {
+export async function runDefectFix(ctx: Ctx, source: StageName, defects: Defect[]): Promise<void> {
   clearOut(ctx.appDir, "dev-report");
   const prompt = [
     `Fix the following ${source} defects in this repository. Address every blocker and major defect; fix minors when cheap.`,
@@ -95,6 +96,7 @@ export async function runDefectFix(ctx: Ctx, source: string, defects: Defect[]):
     parse: (raw) => DevReport.parse(raw),
     logFile: ctx.agentLog(`fix-${source}`),
     scope: `fix:${source}`,
+    ...agentMeta(ctx, source),
   });
   await commitAll(ctx.appDir, `fix: address ${source} defects (${defects.map((d) => d.id).join(", ")})`);
 }

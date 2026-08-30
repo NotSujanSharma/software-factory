@@ -4,11 +4,12 @@ import path from "node:path";
 import { z } from "zod";
 import { runAgentForJson } from "@factory/agents";
 import {
-  authedRemote,
   createPR,
   git,
+  gitClone,
   githubToken,
   makeLogger,
+  remoteUrl,
   run,
 } from "@factory/shared";
 import type { Incident } from "@factory/shared";
@@ -35,10 +36,8 @@ export async function healIncident(incident: Incident, app: AppRow): Promise<voi
   try {
     // Clone from GitHub when available (that is where the PR lives), else from the local repo.
     const source =
-      app.repoFull && githubToken()
-        ? authedRemote(`https://github.com/${app.repoFull}.git`)
-        : app.dir;
-    await run("git", ["clone", source, work], { check: true, timeoutMs: 120000 });
+      app.repoFull && githubToken() ? remoteUrl(`https://github.com/${app.repoFull}.git`) : app.dir;
+    await gitClone(source, work);
     await git(work, "config", "user.email", "healer@self-healing.local");
     await git(work, "config", "user.name", "Factory Healer");
     await git(work, "checkout", "-b", branch);
@@ -60,6 +59,9 @@ export async function healIncident(incident: Incident, app: AppRow): Promise<voi
       parse: (raw) => HealOut.parse(raw),
       logFile: path.join(work, "heal-agent.log"),
       scope: `heal:${incident.id}`,
+      appId: app.appId,
+      appName: app.name,
+      stage: "heal",
     });
 
     if (!data.fixed) {

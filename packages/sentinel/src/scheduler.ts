@@ -6,7 +6,7 @@ import {
   gitTry,
   githubToken,
   isMergedIntoMain,
-  isReachable,
+  verifyHealthy,
   killTree,
   loadConfig,
   makeLogger,
@@ -121,31 +121,36 @@ async function redeployAndVerify(
 ): Promise<void> {
   await redeployApp(app);
 
-  const url = `http://localhost:${app.port}/`;
-  if (await isReachable(url, cfg.autonomous.healthCheckMs)) {
+  const url = `http://localhost:${app.port}`;
+  const health = { ...cfg.health, timeoutMs: cfg.autonomous.healthCheckMs };
+  const verdict = await verifyHealthy(url, health);
+  if (verdict.healthy) {
     setIncident(incident.id, {
       status: "resolved",
-      last_note: `fix merged, redeployed and healthy at ${new Date().toISOString()}`,
+      last_note: `fix merged, redeployed and healthy (${verdict.detail}) at ${new Date().toISOString()}`,
     });
-    log.ok(`incident ${incident.id}: resolved - ${app.name} healthy after redeploy`);
+    log.ok(`incident ${incident.id}: resolved - ${app.name} healthy after redeploy (${verdict.detail})`);
     return;
   }
 
-  log.error(`incident ${incident.id}: ${app.name} did not answer after redeploy`);
+  log.error(`incident ${incident.id}: ${app.name} is unhealthy after redeploy - ${verdict.detail}`);
   if (!cfg.autonomous.rollbackOnUnhealthy || !preSha) {
-    setIncident(incident.id, { status: "failed", last_note: "app unhealthy after redeploy; rollback disabled" });
+    setIncident(incident.id, {
+      status: "failed",
+      last_note: `app unhealthy after redeploy (${verdict.detail}); rollback disabled`.slice(0, 500),
+    });
     return;
   }
 
   await rollbackTo(app, preSha);
   await redeployApp(app);
-  const recovered = await isReachable(url, cfg.autonomous.healthCheckMs);
+  const recovered = (await verifyHealthy(url, health)).healthy;
   log.warn(`incident ${incident.id}: rolled back to ${preSha.slice(0, 8)} (recovered=${recovered})`);
 
   const rearms = incident.rearms + 1;
   const note =
-    `fix broke the app and was rolled back to ${preSha.slice(0, 8)} (recovered=${recovered}). ` +
-    `The previous fix was wrong - try a different approach.`;
+    `fix broke the app (${verdict.detail}) and was rolled back to ${preSha.slice(0, 8)} ` +
+    `(recovered=${recovered}). The previous fix was wrong - try a different approach.`;
   if (cfg.autonomous.maxIncidentRearms && rearms > cfg.autonomous.maxIncidentRearms) {
     setIncident(incident.id, { status: "failed", last_note: `${note} Re-arm budget spent.`.slice(0, 500) });
   } else {
@@ -212,6 +217,7 @@ export async function redeployApp(app: AppRow): Promise<void> {
       FACTORY_APP_ID: app.appId,
       SENTINEL_URL: cfg.sentinel.url,
       FACTORY_RELEASE: sha,
+      FACTORY_INGEST_KEY: app.ingestKey ?? "",
     },
     logFile: path.join(app.dir, ".factory", "app.log"),
   });

@@ -1,9 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { loadConfig, makeLogger, sleepWithHeartbeat, type Logger } from "@factory/shared";
+import { query, type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
+import {
+  BudgetExceededError,
+  checkBudget,
+  formatUsd,
+  loadConfig,
+  makeLogger,
+  recordSpend,
+  redact,
+  sleepWithHeartbeat,
+  type FactoryConfig,
+  type Logger,
+} from "@factory/shared";
 import { formatDuration, isLimitMessage, planLimitWait } from "./limits.ts";
+import { makeGuard, type Guard } from "./guard.ts";
 
 export type Role =
   | "requirements"
@@ -21,6 +33,8 @@ export interface AgentRunResult {
   costUsd: number;
   turns: number;
   isError: boolean;
+  /** Tool calls the guard refused during this run. */
+  denials: string[];
 }
 
 const promptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../prompts");
@@ -37,27 +51,63 @@ export interface RunAgentOptions {
   maxTurns?: number;
   logFile?: string;
   scope?: string;
+  /** Attribution for the spend ledger and the per-app / per-stage budgets. */
+  appId?: string;
+  appName?: string;
+  stage?: string;
+}
+
+/** The model this role runs on: explicit override, then per-role route, then the default. */
+export function modelFor(cfg: FactoryConfig, role: Role, override?: string): string {
+  return override ?? cfg.models[role] ?? cfg.model;
 }
 
 /** One pass of the agent loop. Throws whatever the SDK throws. */
 async function runAgentOnce(
   opts: RunAgentOptions,
   model: string,
+  cfg: FactoryConfig,
   log: Logger,
   record: (line: string) => void,
+  guard: Guard,
 ): Promise<AgentRunResult> {
-  let result: AgentRunResult = { text: "", costUsd: 0, turns: 0, isError: true };
+  let result: AgentRunResult = { text: "", costUsd: 0, turns: 0, isError: true, denials: [] };
 
   const q = query({
     prompt: opts.prompt,
     options: {
       cwd: opts.cwd,
-      model: opts.model ?? model,
+      model,
       systemPrompt: { type: "preset", preset: "claude_code", append: rolePrompt(opts.role) },
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       settingSources: [],
-      maxTurns: opts.maxTurns ?? 80,
+      maxTurns: opts.maxTurns ?? cfg.budget.maxTurnsPerRun,
+      // Permissions are bypassed above, so this hook is the only thing standing
+      // between an agent and the rest of the machine.
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              async (input) => {
+                const i = input as PreToolUseHookInput;
+                const decision = guard.check(i.tool_name, (i.tool_input ?? {}) as Record<string, unknown>);
+                if (decision.allow) return { continue: true };
+                record(`[denied] ${i.tool_name}: ${decision.reason}`);
+                log.warn(`guard denied ${i.tool_name}: ${decision.reason}`);
+                return {
+                  continue: true,
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse" as const,
+                    permissionDecision: "deny" as const,
+                    permissionDecisionReason: decision.reason ?? "denied by the factory guard",
+                  },
+                };
+              },
+            ],
+          },
+        ],
+      },
     },
   });
 
@@ -65,13 +115,13 @@ async function runAgentOnce(
     if (message.type === "assistant") {
       for (const block of message.message.content ?? []) {
         if (block.type === "text" && block.text.trim()) {
-          const line = block.text.trim();
+          const line = redact(block.text.trim());
           record(`[assistant] ${line}`);
-          log.agent(line.length > 200 ? line.slice(0, 200) + "\u2026" : line);
+          log.agent(line.length > 200 ? line.slice(0, 200) + "…" : line);
         } else if (block.type === "tool_use") {
-          const input = JSON.stringify(block.input ?? {});
+          const input = redact(JSON.stringify(block.input ?? {}));
           record(`[tool] ${block.name} ${input}`);
-          log.info(`tool: ${block.name} ${input.length > 140 ? input.slice(0, 140) + "\u2026" : input}`);
+          log.info(`tool: ${block.name} ${input.length > 140 ? input.slice(0, 140) + "…" : input}`);
         }
       }
     } else if (message.type === "result") {
@@ -80,26 +130,56 @@ async function runAgentOnce(
         costUsd: (message as { total_cost_usd?: number }).total_cost_usd ?? 0,
         turns: (message as { num_turns?: number }).num_turns ?? 0,
         isError: message.is_error,
+        denials: guard.denials,
       };
-      record(`[result] ${result.text}`);
+      record(`[result] ${redact(result.text)}`);
     }
   }
   return result;
 }
 
 /**
- * Run one agent to completion inside `cwd` with full tool access (scoped by cwd).
+ * Refuse - or defer - a run that would breach a budget.
+ *
+ * The rolling window is the only ceiling that recovers on its own, so it is the
+ * only one worth sleeping on, and sleeping on it is what keeps an unattended run
+ * hands-free instead of parking until someone notices. Every other ceiling needs a
+ * human to raise it, so hitting one is a permanent failure and says so.
+ */
+async function gateOnBudget(cfg: FactoryConfig, opts: RunAgentOptions, log: Logger): Promise<void> {
+  for (;;) {
+    const decision = checkBudget(cfg, { appId: opts.appId, stage: opts.stage, scope: opts.scope });
+    if (decision.allowed) return;
+
+    if (!decision.recoverable || cfg.budget.onDailyExhausted !== "wait" || !decision.resetAt) {
+      log.error(decision.message);
+      throw new BudgetExceededError(decision);
+    }
+
+    const waitMs = Math.max(60_000, decision.resetAt.getTime() - Date.now());
+    log.warn(
+      `${decision.message} - sleeping ${formatDuration(waitMs)} until the window frees up ` +
+        `(set budget.onDailyExhausted to "park" to fail instead)`,
+    );
+    await sleepWithHeartbeat(waitMs, (left) => log.info(`budget wait: ${formatDuration(left)} remaining`));
+  }
+}
+
+/**
+ * Run one agent to completion inside `cwd`, with tool access mediated by the guard.
  * Role system prompts are appended to the Claude Code preset.
  *
- * A session/usage limit is not a failure: the run sleeps until the limit resets
- * and retries, so an unattended pipeline survives running out of tokens.
+ * Two conditions are absorbed rather than treated as failures: a session/usage
+ * limit (sleep until it resets, then retry) and an exhausted rolling budget (sleep
+ * until spend ages out of the window). Every attempt is written to the ledger.
  */
 export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
   const cfg = loadConfig();
   const log = makeLogger(opts.scope ?? `agent:${opts.role}`);
   const record = (line: string) => {
-    if (opts.logFile) fs.appendFileSync(opts.logFile, line + "\n");
+    if (opts.logFile) fs.appendFileSync(opts.logFile, redact(line) + "\n");
   };
+  const model = modelFor(cfg, opts.role, opts.model);
 
   const waitOpts = {
     bufferMs: cfg.autonomous.limitBufferMs,
@@ -107,25 +187,50 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
     fallbackMs: cfg.autonomous.limitFallbackMs,
   };
 
-  log.agent(`starting (cwd=${opts.cwd})`);
+  log.agent(`starting on ${model} (cwd=${opts.cwd})`);
 
   for (let attempt = 1; ; attempt++) {
+    await gateOnBudget(cfg, opts, log);
+
+    const guard = makeGuard(cfg, opts.cwd);
+    const startedAt = Date.now();
     let result: AgentRunResult | null = null;
     let limitText: string | null = null;
+    let threw: unknown = null;
 
     try {
-      result = await runAgentOnce(opts, cfg.model, log, record);
+      result = await runAgentOnce(opts, model, cfg, log, record, guard);
       if (isLimitMessage(result.text)) limitText = result.text;
     } catch (err) {
       const msg = String(err instanceof Error ? err.message : err);
-      if (!isLimitMessage(msg)) throw err;
-      limitText = msg;
+      if (isLimitMessage(msg)) limitText = msg;
+      else threw = err;
     }
+
+    // Book what this attempt cost before deciding what happens next, so a run that
+    // throws or goes to sleep still lands in the ledger.
+    recordSpend({
+      appId: opts.appId ?? "",
+      appName: opts.appName,
+      role: opts.role,
+      stage: opts.stage,
+      scope: opts.scope ?? opts.role,
+      model,
+      costUsd: result?.costUsd ?? 0,
+      turns: result?.turns ?? 0,
+      toolCalls: guard.calls,
+      durationMs: Date.now() - startedAt,
+      isError: result ? result.isError : true,
+    });
+
+    if (threw) throw threw;
 
     if (!limitText) {
       const done = result!;
+      const denied = done.denials.length ? ` denied=${done.denials.length}` : "";
       log[done.isError ? "error" : "ok"](
-        `finished: turns=${done.turns} cost=$${done.costUsd.toFixed(3)} error=${done.isError}`,
+        `finished: turns=${done.turns} tools=${guard.calls} cost=${formatUsd(done.costUsd)} ` +
+          `error=${done.isError}${denied}`,
       );
       return done;
     }

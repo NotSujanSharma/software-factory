@@ -3,6 +3,11 @@ workspace/
 *.log
 .env
 sentinel.db
+factory.db
+factory.db-*
+.factory-admin-token
 watchdog-*.log
 watchdog-*.log.err
 .factory-watchdog.pid
+.factory-askpass.cmd
+.factory-askpass.sh

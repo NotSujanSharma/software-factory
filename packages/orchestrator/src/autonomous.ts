@@ -6,7 +6,7 @@
  * sentinel so runtime errors get healed. Nothing here ever reads from stdin.
  */
 import net from "node:net";
-import { commitAll, makeLogger, sleepWithHeartbeat } from "@factory/shared";
+import { BudgetExceededError, budgetReport, commitAll, makeLogger, sleepWithHeartbeat } from "@factory/shared";
 import type { WorkItem } from "@factory/shared";
 import { formatDuration } from "@factory/agents";
 import { rearmState, reopenStages } from "./state.ts";
@@ -18,6 +18,19 @@ import { evolutionStage } from "./stages/evolution.ts";
 import { startApp } from "./stages/deploy.ts";
 
 const log = makeLogger("autonomous");
+
+/**
+ * Is this failure one that retrying cannot fix?
+ *
+ * Two cases matter today. A budget ceiling only a human can raise will still be
+ * spent on the next attempt, so retrying just burns the remaining headroom. A
+ * failed preflight - no login, no disk, an occupied port - is not going to fix
+ * itself between attempts either. Anything else opting in via `permanent` counts.
+ */
+function isPermanent(err: unknown): boolean {
+  if (err instanceof BudgetExceededError) return true;
+  return Boolean(err && typeof err === "object" && (err as { permanent?: unknown }).permanent === true);
+}
 
 /** Is something already listening on this port? */
 function portInUse(port: number): Promise<boolean> {
@@ -66,6 +79,12 @@ async function withStageRetries(ctx: Ctx, label: string, fn: () => Promise<void>
       await fn();
       return;
     } catch (err) {
+      // A permanent failure cannot be retried into success. Spending five more
+      // agent runs discovering that is exactly the waste this guard exists to stop.
+      if (isPermanent(err)) {
+        log.error(`${label} hit a permanent failure, not retrying: ${String(err)}`);
+        throw err;
+      }
       const msg = String(err instanceof Error ? err.message : err).slice(0, 400);
       const budget = max === 0 ? "unlimited" : String(max);
       log.warn(`${label} did not converge (attempt ${attempt}/${budget}): ${msg}`);
@@ -137,6 +156,8 @@ export async function runAutonomous(ctx: Ctx, opts: AutonomousOptions = {}): Pro
       `waitOnLimit=${cfg.autonomous.waitOnLimit} autoMergeHeals=${cfg.approvals.autoMergeHealPRs}`,
   );
 
+  for (const line of budgetReport(cfg, ctx.state.app.id)) log.info(line);
+
   await ensureSentinel(ctx);
 
   // Anything left parked by a previous run goes back on the board before we start.
@@ -160,6 +181,10 @@ export async function runAutonomous(ctx: Ctx, opts: AutonomousOptions = {}): Pro
     try {
       await withStageRetries(ctx, `evolution round ${round}`, () => evolutionRound(ctx, round).then(() => undefined));
     } catch (err) {
+      if (isPermanent(err)) {
+        log.error(`evolution stopped: ${String(err)}`);
+        break;
+      }
       // A single bad round must not end the supervisor; the next one re-analyses from scratch.
       log.error(`evolution round ${round} abandoned: ${String(err).slice(0, 300)}`);
     }
