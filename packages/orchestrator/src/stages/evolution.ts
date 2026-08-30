@@ -1,7 +1,7 @@
 import { runAgentForJson } from "@factory/agents";
 import { commitAll } from "@factory/shared";
 import { outPath, clearOut, EvolutionOut } from "../state.ts";
-import { beginStage, endStage, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, type Ctx } from "./context.ts";
 import type { z } from "zod";
 
 export type EvolutionData = z.infer<typeof EvolutionOut>;
@@ -20,6 +20,7 @@ export async function evolutionStage(ctx: Ctx): Promise<EvolutionData> {
     parse: (raw) => EvolutionOut.parse(raw),
     logFile: ctx.agentLog("evolution"),
     scope: "evolution",
+    ...agentMeta(ctx, "evolution"),
   });
   await commitAll(ctx.appDir, "docs: evolution analysis and improvement proposals");
   endStage(ctx, "evolution", "passed", `${data.proposals.length} proposals`);

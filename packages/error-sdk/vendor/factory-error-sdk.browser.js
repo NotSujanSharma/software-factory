@@ -1,17 +1,19 @@
 /**
  * Factory error SDK - browser side.
  * Served by the app (e.g. at /factory-error-sdk.js) and included from its HTML:
- *   <script src="/factory-error-sdk.js" data-app-id="..." data-sentinel="http://localhost:4600"></script>
- * Falls back to same-origin POST /__factory_error when data-sentinel is absent,
- * so a server-side proxy route can forward it (avoids CORS entirely).
+ *   <script src="/factory-error-sdk.js" data-app-id="..."></script>
+ *
+ * Always posts same-origin to /__factory_error, where the app's own server adds
+ * the ingest key and forwards to the sentinel (see browserProxy() in the CJS SDK).
+ * Reporting straight to the sentinel from a page is deliberately not supported:
+ * it would mean shipping the key to every visitor, and it would need CORS.
  */
 (function () {
   "use strict";
   var script = document.currentScript;
   var appId = (script && script.getAttribute("data-app-id")) || "";
-  var sentinel = (script && script.getAttribute("data-sentinel")) || "";
   var release = (script && script.getAttribute("data-release")) || "";
-  var endpoint = sentinel ? sentinel.replace(/\/$/, "") + "/ingest" : "/__factory_error";
+  var endpoint = "/__factory_error";
   var sent = Object.create(null);
 
   function report(type, message, stack, extra) {

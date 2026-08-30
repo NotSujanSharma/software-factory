@@ -11,9 +11,21 @@ export type StageName =
 
 export interface FactoryConfig {
   model: string;
+  /** Per-role model overrides; anything unset falls back to `model`. */
+  models: ModelRoutes;
   workspaceDir: string;
-  sentinel: { port: number; url: string };
+  sentinel: {
+    port: number;
+    url: string;
+    /** Interface to bind. Defaults to loopback - the ingest API is not public. */
+    host: string;
+    /** Reject ingest without a valid per-app key. */
+    requireKey: boolean;
+    rateLimit: IngestRateLimit;
+  };
   github: { enabled: boolean; owner: string; private: boolean };
+  budget: BudgetConfig;
+  sandbox: SandboxConfig;
   limits: {
     qaIterations: number;
     reviewIterations: number;
@@ -155,4 +167,74 @@ export interface RegisteredApp {
   repoUrl?: string;
   port: number;
   startCmd: string;
+}
+
+// ---------- cost control ----------
+
+/**
+ * Spend ceilings. Dollar budgets are checked *before* each agent run, because the
+ * SDK only reports cost when a run finishes: a single run can therefore overshoot
+ * by at most its own cost, which `maxTurnsPerRun` / `maxToolCallsPerRun` bound.
+ * A ceiling of 0 means "no limit".
+ */
+export interface BudgetConfig {
+  enabled: boolean;
+  /** Rolling-window ceiling across every app and agent. */
+  dailyUsd: number;
+  /** Length of that rolling window. */
+  dailyWindowHours: number;
+  /** Lifetime ceiling for one app: build + evolution + every heal it needs. */
+  perAppUsd: number;
+  /** Ceiling for one pipeline stage, summed across its retries and iterations. */
+  perStageUsd: number;
+  /** Ceiling for healing one incident, summed across attempts. */
+  perIncidentUsd: number;
+  /** Ceiling on all spend ever recorded in the ledger. The last-resort kill switch. */
+  totalUsd: number;
+  /** Turn ceiling handed to the SDK for a single run. */
+  maxTurnsPerRun: number;
+  /** Tool-call ceiling enforced by the guard hook within a single run. */
+  maxToolCallsPerRun: number;
+  /**
+   * What an unattended run does when the *daily* budget is spent. "wait" sleeps
+   * until the window rolls (hands-free); "park" fails the stage for a human.
+   * Non-windowed ceilings can never resolve on their own, so they always park.
+   */
+  onDailyExhausted: "wait" | "park";
+}
+
+/**
+ * Per-role model overrides. Falls back to `FactoryConfig.model` for any role left
+ * unset. Cheap roles on a cheap model is the largest single cost lever available.
+ */
+export type ModelRoutes = Partial<Record<string, string>>;
+
+// ---------- agent sandboxing ----------
+
+/**
+ * Guardrails applied to every agent tool call. This is a guardrail, not a jail:
+ * it makes the known-bad moves impossible rather than proving the agent harmless.
+ * Real isolation needs a container; this costs one in-process function call.
+ */
+export interface SandboxConfig {
+  enabled: boolean;
+  /** Refuse file tools that resolve outside the agent's working directory. */
+  confineToWorkdir: boolean;
+  /** Absolute paths an agent may touch in addition to its working directory. */
+  allowPaths: string[];
+  /** Regex sources; a Bash command matching any of them is denied. */
+  denyCommands: string[];
+  /** Deny `curl … | sh` style fetch-and-execute pipelines. */
+  blockRemoteExec: boolean;
+}
+
+// ---------- error ingest security ----------
+
+export interface IngestRateLimit {
+  /** Sustained per-app event rate. */
+  eventsPerMinute: number;
+  /** Bucket depth, so a burst of simultaneous crashes is not dropped. */
+  burst: number;
+  /** Per-app ceiling on *new* incidents per hour - caps healing-agent storms. */
+  newIncidentsPerHour: number;
 }

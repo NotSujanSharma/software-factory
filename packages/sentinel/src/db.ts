@@ -1,6 +1,6 @@
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { frameworkRoot } from "@factory/shared";
+import { frameworkRoot, newKey } from "@factory/shared";
 import type { ErrorEvent, Incident, IncidentStatus, RegisteredApp } from "@factory/shared";
 
 let db: DatabaseSync | null = null;
@@ -39,9 +39,10 @@ export function getDb(): DatabaseSync {
 
 /** Additive column migrations for stores created by an earlier version. */
 function migrate(d: DatabaseSync): void {
-  const cols = (d.prepare("PRAGMA table_info(incidents)").all() as Record<string, unknown>[]).map((r) =>
-    String(r.name),
-  );
+  const columns = (table: string) =>
+    (d.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[]).map((r) => String(r.name));
+
+  const cols = columns("incidents");
   if (!cols.includes("rearms")) {
     d.exec("ALTER TABLE incidents ADD COLUMN rearms INTEGER NOT NULL DEFAULT 0");
   }
@@ -49,6 +50,17 @@ function migrate(d: DatabaseSync): void {
     // When the status last changed - the cooldown clock for auto re-arming.
     d.exec("ALTER TABLE incidents ADD COLUMN status_at TEXT");
     d.exec("UPDATE incidents SET status_at = last_seen WHERE status_at IS NULL");
+  }
+  if (!cols.includes("created_at")) {
+    // When the incident was first opened - the clock for the per-app new-incident cap.
+    d.exec("ALTER TABLE incidents ADD COLUMN created_at TEXT");
+    d.exec("UPDATE incidents SET created_at = first_seen WHERE created_at IS NULL");
+  }
+
+  const appCols = columns("apps");
+  if (!appCols.includes("ingest_key")) {
+    // Per-app shared secret for /ingest. Existing rows get one on next registration.
+    d.exec("ALTER TABLE apps ADD COLUMN ingest_key TEXT");
   }
 }
 
@@ -71,33 +83,48 @@ function rowToIncident(r: Record<string, unknown>): Incident {
   };
 }
 
-/** Upsert an error event into its incident (dedup by fingerprint). Returns the incident. */
+/**
+ * Upsert an error event into its incident (dedup by fingerprint). Returns the incident.
+ *
+ * Done as one atomic statement rather than select-then-insert: a crash loop reports
+ * the same brand-new error from several requests at once, and racing INSERTs would
+ * make the loser blow up on the UNIQUE constraint and hand the failing app a 500
+ * from the very telemetry meant to be invisible to it.
+ *
+ * A recurrence after `resolved` or `failed` reopens the incident with fresh context;
+ * `open` / `healing` / `pr_open` only bump the count, so a duplicate healing agent
+ * can never be spawned.
+ */
 export function recordEvent(fingerprint: string, event: ErrorEvent): Incident {
   const d = getDb();
   const now = new Date().toISOString();
-  const existing = d.prepare("SELECT * FROM incidents WHERE fingerprint = ?").get(fingerprint) as
-    | Record<string, unknown>
-    | undefined;
-  if (!existing) {
-    d.prepare(
-      "INSERT INTO incidents (app_id, fingerprint, status, count, first_seen, last_seen, sample_event) VALUES (?, ?, 'open', 1, ?, ?, ?)",
-    ).run(event.appId, fingerprint, now, now, JSON.stringify(event));
-  } else if (existing.status === "resolved" || existing.status === "failed") {
-    // Recurrence after a fix (or a failed heal): reopen with fresh context.
-    d.prepare(
-      "UPDATE incidents SET status = 'open', count = count + 1, last_seen = ?, sample_event = ?, last_note = ? WHERE id = ?",
-    ).run(
-      now,
-      JSON.stringify(event),
-      `reopened: recurred after status=${existing.status}${existing.pr_url ? ` (previous fix: ${existing.pr_url})` : ""}`,
-      Number(existing.id),
-    );
-  } else {
-    // open / healing / pr_open: just count the occurrence - never spawn a duplicate.
-    d.prepare("UPDATE incidents SET count = count + 1, last_seen = ? WHERE id = ?").run(now, Number(existing.id));
-  }
+  const REOPENING = "incidents.status IN ('resolved', 'failed')";
+
+  d.prepare(
+    `INSERT INTO incidents (app_id, fingerprint, status, count, first_seen, last_seen, created_at, status_at, sample_event)
+     VALUES (?, ?, 'open', 1, ?, ?, ?, ?, ?)
+     ON CONFLICT(fingerprint) DO UPDATE SET
+       count        = incidents.count + 1,
+       last_seen    = excluded.last_seen,
+       status       = CASE WHEN ${REOPENING} THEN 'open'                ELSE incidents.status       END,
+       status_at    = CASE WHEN ${REOPENING} THEN excluded.status_at    ELSE incidents.status_at    END,
+       sample_event = CASE WHEN ${REOPENING} THEN excluded.sample_event ELSE incidents.sample_event END,
+       last_note    = CASE WHEN ${REOPENING}
+                           THEN 'reopened: recurred after status=' || incidents.status
+                                || COALESCE(' (previous fix: ' || incidents.pr_url || ')', '')
+                           ELSE incidents.last_note END`,
+  ).run(event.appId, fingerprint, now, now, now, now, JSON.stringify(event));
+
   const row = d.prepare("SELECT * FROM incidents WHERE fingerprint = ?").get(fingerprint) as Record<string, unknown>;
   return rowToIncident(row);
+}
+
+/** Incidents first opened for this app since `since` - the new-incident rate cap. */
+export function countIncidentsSince(appId: string, since: Date): number {
+  const r = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM incidents WHERE app_id = ? AND COALESCE(created_at, first_seen) >= ?")
+    .get(appId, since.toISOString()) as { n: number } | undefined;
+  return Number(r?.n ?? 0);
 }
 
 /** Atomically claim an open incident for healing. Returns true if this caller won the claim. */
@@ -141,12 +168,37 @@ export function getIncident(id: number): Incident | null {
   return row ? rowToIncident(row) : null;
 }
 
-export function upsertApp(app: RegisteredApp & { repoFull?: string | null }): void {
+/**
+ * Register or update an app, minting its ingest key on first registration.
+ * Returns the key so the deploy stage can hand it to the app it is about to start.
+ * A re-deploy keeps the existing key, so a restart never invalidates a running app.
+ */
+export function upsertApp(app: RegisteredApp & { repoFull?: string | null }): string {
   getDb()
     .prepare(
-      "INSERT INTO apps (app_id, name, dir, repo_full, port, start_cmd) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(app_id) DO UPDATE SET name=excluded.name, dir=excluded.dir, repo_full=excluded.repo_full, port=excluded.port, start_cmd=excluded.start_cmd",
+      `INSERT INTO apps (app_id, name, dir, repo_full, port, start_cmd, ingest_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(app_id) DO UPDATE SET
+         name = excluded.name, dir = excluded.dir, repo_full = excluded.repo_full,
+         port = excluded.port, start_cmd = excluded.start_cmd,
+         ingest_key = COALESCE(apps.ingest_key, excluded.ingest_key)`,
     )
-    .run(app.appId, app.name, app.dir, app.repoFull ?? app.repoUrl ?? null, app.port, app.startCmd);
+    .run(app.appId, app.name, app.dir, app.repoFull ?? app.repoUrl ?? null, app.port, app.startCmd, newKey());
+  return ingestKey(app.appId) ?? "";
+}
+
+export function ingestKey(appId: string): string | null {
+  const r = getDb().prepare("SELECT ingest_key FROM apps WHERE app_id = ?").get(appId) as
+    | Record<string, unknown>
+    | undefined;
+  return (r?.ingest_key as string) ?? null;
+}
+
+/** Issue a fresh key, invalidating the old one. The app must be redeployed to pick it up. */
+export function rotateIngestKey(appId: string): string {
+  const key = newKey();
+  getDb().prepare("UPDATE apps SET ingest_key = ? WHERE app_id = ?").run(key, appId);
+  return key;
 }
 
 export interface AppRow {
@@ -156,6 +208,7 @@ export interface AppRow {
   repoFull: string | null;
   port: number;
   startCmd: string;
+  ingestKey: string | null;
 }
 
 export function getApp(appId: string): AppRow | null {
@@ -168,5 +221,6 @@ export function getApp(appId: string): AppRow | null {
     repoFull: (r.repo_full as string) ?? null,
     port: Number(r.port),
     startCmd: String(r.start_cmd),
+    ingestKey: (r.ingest_key as string) ?? null,
   };
 }

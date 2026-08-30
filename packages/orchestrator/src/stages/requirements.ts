@@ -1,6 +1,6 @@
 import { runAgentForJson } from "@factory/agents";
 import { outPath, clearOut, RequirementsOut } from "../state.ts";
-import { beginStage, endStage, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, type Ctx } from "./context.ts";
 
 export async function requirementsStage(ctx: Ctx, extraContext: string): Promise<void> {
   beginStage(ctx, "requirements");
@@ -22,6 +22,7 @@ export async function requirementsStage(ctx: Ctx, extraContext: string): Promise
     outFile: out,
     parse: (raw) => RequirementsOut.parse(raw),
     logFile: ctx.agentLog("requirements"),
+    ...agentMeta(ctx, "requirements"),
   });
 
   ctx.state.criteria = data.criteria;

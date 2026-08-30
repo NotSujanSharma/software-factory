@@ -19,16 +19,20 @@ uncommitted in the working tree, and do not wait to be asked.
 ## Repo layout
 
 ```
-packages/shared        types, config loader, git/GitHub helpers, proc + http utils
-packages/agents        Claude Agent SDK runner, session-limit handling, role prompts
+packages/shared        types, config loader, git/GitHub helpers, proc + http utils,
+                       spend ledger + budget policy, secrets/redaction, admin token
+packages/agents        Claude Agent SDK runner, session-limit handling, role prompts,
+                       PreToolUse guard (sandbox + per-run tool ceiling)
 packages/orchestrator  pipeline state machine, stages, autonomous supervisor, CLI
-packages/sentinel      error ingest server, SQLite incident store, healing scheduler
+packages/sentinel      error ingest server, SQLite incident store, healing scheduler,
+                       ingest rate limiter
 packages/error-sdk     vendored global error handlers injected into built apps
 workspace/             generated apps (gitignored; each its own git repo)
 ```
 
-`sentinel.db`, `workspace/`, `watchdog-*.log` and `.factory-watchdog.pid` are all
-gitignored — never commit them.
+`sentinel.db`, `factory.db`, `.factory-admin-token`, `workspace/`, `watchdog-*.log`
+and `.factory-watchdog.pid` are all gitignored — never commit them. The last two DB
+files and the token file hold secrets and spend history.
 
 ## Commands
 
@@ -38,6 +42,8 @@ npm test                                # tsx --test tests/*.test.ts
 npm run factory -- auto "<prompt>"      # unattended build -> heal -> evolve
 npm run factory -- sentinel start       # ingest + scheduler + dashboard on :4600
 npm run factory -- apps | status <app> | stop <app>
+npm run factory -- cost [--app <name>] [--recent <n>]   # spend + budget headroom
+npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
 ```
 
 ## Conventions that matter here
@@ -48,3 +54,18 @@ npm run factory -- apps | status <app> | stop <app>
 - Every gate loop must be bounded and must park as `needs_human` rather than spin.
 - Adding a stage means touching `STAGE_ORDER`, the `runPipeline` switch, and
   `StageName` — there is no plugin registry yet.
+- Every `runAgent`/`runAgentForJson` call must carry attribution
+  (`...agentMeta(ctx, stage)`, or `appId`/`appName`/`stage` directly). Without it
+  the run is billed to no app and escapes the per-app and per-stage ceilings.
+- Budgets and the sandbox are **on by default** and unattended mode never relaxes
+  them. A failure that a human must resolve should carry `permanent` (as
+  `BudgetExceededError` does) so the supervisor does not retry it.
+- Never write a secret into `.factory/state.json` — it lives in the generated
+  app's git repo. Ingest keys are read from the sentinel store at process start.
+
+## Writing files in this repo
+
+Heredocs through the Bash tool have mangled backslash escapes here (`[\\/]`
+collapsed to `[\/]`, silently breaking a regex). For files containing regexes or
+escape sequences, use the Write/Edit tools, or `String.raw`, or build the pattern
+with `new RegExp` from a named string.

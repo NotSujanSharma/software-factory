@@ -12,6 +12,12 @@ import {
   githubToken,
   authedRemote,
   AUTONOMOUS_ENV,
+  budgetReport,
+  formatUsd,
+  recentSpend,
+  spendByApp,
+  spendByRole,
+  spendByStage,
 } from "@factory/shared";
 import type { WorkItem } from "@factory/shared";
 import { appDirFor, createApp, openApp, runPipeline } from "./pipeline.ts";
@@ -182,6 +188,62 @@ program
   });
 
 program
+  .command("cost")
+  .option("--app <name>", "break the report down for one app")
+  .option("--recent <n>", "also list the N most recent agent runs", "0")
+  .description("spend ledger and remaining budget headroom")
+  .action((opts: { app?: string; recent: string }) => {
+    const cfg = loadConfig();
+    const appId = opts.app ? openApp(cfg, opts.app).state.app.id : undefined;
+
+    console.log("budgets");
+    for (const line of budgetReport(cfg, appId)) console.log(`  ${line}`);
+
+    const table = (title: string, rows: { key: string; costUsd: number; runs: number; errors: number }[]) => {
+      if (!rows.length) return;
+      console.log("");
+      console.log(title);
+      for (const r of rows) {
+        console.log(
+          `  ${r.key.padEnd(16)} ${formatUsd(r.costUsd).padStart(9)}  ${String(r.runs).padStart(3)} runs` +
+            (r.errors ? `  ${r.errors} errored` : ""),
+        );
+      }
+    };
+
+    if (appId) {
+      table("by stage", spendByStage(appId));
+      table("by role", spendByRole(appId));
+    } else {
+      table("by app", spendByApp());
+      table("by role", spendByRole());
+    }
+
+    const n = Number(opts.recent);
+    if (n > 0) {
+      console.log("");
+      console.log("recent runs");
+      for (const r of recentSpend(n)) {
+        console.log(
+          `  ${r.ts.slice(0, 19)}  ${(r.appName ?? "-").padEnd(12)} ${r.role.padEnd(12)} ` +
+            `${formatUsd(r.costUsd).padStart(9)}  turns=${r.turns} tools=${r.toolCalls}${r.isError ? "  ERROR" : ""}`,
+        );
+      }
+    }
+  });
+
+program
+  .command("rotate-key")
+  .argument("<app>")
+  .description("issue a new ingest key; the app must be restarted to pick it up")
+  .action(async (name: string) => {
+    const ctx = openApp(loadConfig(), name);
+    const { rotateIngestKey } = await import("@factory/sentinel");
+    rotateIngestKey(ctx.state.app.id);
+    log.ok(`ingest key rotated for ${name} - restart it so it picks the new one up`);
+  });
+
+program
   .command("demo-error")
   .argument("<app>")
   .description("plant a realistic bug, redeploy, and trigger it twice (e2e healing demo)")
@@ -204,6 +266,8 @@ program
       parse: (raw) => DevReport.parse(raw),
       logFile: ctx.agentLog("demo-bug"),
       scope: "demo-bug",
+      appId: ctx.state.app.id,
+      appName: ctx.state.app.name,
     });
     if (!data.crashRepro) throw new Error("dev agent did not provide crashRepro");
     await commitAll(ctx.appDir, "chore: (demo) simulated regression for self-healing test");

@@ -4,6 +4,7 @@ import path from "node:path";
 import { runAgentForJson } from "@factory/agents";
 import { vendorFilePath, browserFilePath, VENDOR_FILE_NAME, BROWSER_FILE_NAME } from "@factory/error-sdk";
 import {
+  adminToken,
   authedRemote,
   commitAll,
   currentSha,
@@ -19,7 +20,7 @@ import {
 import { outPath, clearOut, DevReport } from "../state.ts";
 
 export { waitForHttp } from "@factory/shared";
-import { beginStage, endStage, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, type Ctx } from "./context.ts";
 
 export async function deployStage(ctx: Ctx): Promise<void> {
   beginStage(ctx, "deploy");
@@ -39,8 +40,11 @@ export async function deployStage(ctx: Ctx): Promise<void> {
       `2. if the app uses Express, register expressErrorHandler() AFTER all routes/middleware.`,
       `ONLY if this app serves HTML pages to a browser:`,
       `3. serve ${BROWSER_FILE_NAME} as a static file at /factory-error-sdk.js, and include it in the HTML head as`,
-      `   <script src="/factory-error-sdk.js" data-app-id="..." data-sentinel="..."></script> using process.env.FACTORY_APP_ID and process.env.SENTINEL_URL;`,
-      `4. add a POST /__factory_error route that forwards the JSON body to SENTINEL_URL + "/ingest" (the browser fallback path when data-sentinel is unset).`,
+      `   <script src="/factory-error-sdk.js" data-app-id="..."></script> using process.env.FACTORY_APP_ID;`,
+      `4. mount the SDK's own proxy for browser reports:`,
+      `   app.post("/__factory_error", express.json({ limit: "64kb" }), factoryErrors.browserProxy());`,
+      `SECURITY: never render FACTORY_INGEST_KEY or SENTINEL_URL into HTML, a client bundle, or a data- attribute.`,
+      `The browser script reports same-origin to /__factory_error and the proxy adds the key server-side.`,
       `If the app is API-only with no HTML, skip steps 3-4 and delete ${BROWSER_FILE_NAME}.`,
       `Do not change any other behavior. Run npm test to confirm nothing broke.`,
       `Write .factory/out/dev-report.json with itemId "DEPLOY-WIRE".`,
@@ -50,6 +54,7 @@ export async function deployStage(ctx: Ctx): Promise<void> {
     parse: (raw) => DevReport.parse(raw),
     logFile: ctx.agentLog("deploy-wire"),
     scope: "deploy:wire",
+    ...agentMeta(ctx, "deploy"),
   });
   await commitAll(appDir, "chore: wire factory error sdk for self-healing");
 
@@ -65,15 +70,14 @@ export async function deployStage(ctx: Ctx): Promise<void> {
     ctx.log.warn("GitHub disabled or GITHUB_TOKEN missing - skipping remote push");
   }
 
-  // 3. Start the app locally with healing env wired to the sentinel.
+  // 3. Register the app so healing can find it, and so it is issued the ingest key
+  //    it must present to report errors. This has to happen before the app starts,
+  //    because the key is handed to it through its environment.
   const port = state.app.port ?? (await findFreePort(cfg.deploy.basePort));
   state.app.port = port;
   state.app.releaseSha = await currentSha(appDir);
   ctx.save();
-  await startApp(ctx, port);
 
-  // 4. Register the app so healing can find it. Try the running sentinel first;
-  //    fall back to writing its store directly so deploy order never matters.
   const registration = {
     appId: state.app.id,
     name: state.app.name,
@@ -85,16 +89,20 @@ export async function deployStage(ctx: Ctx): Promise<void> {
   try {
     const res = await fetch(`${cfg.sentinel.url}/apps`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-factory-admin": adminToken() },
       body: JSON.stringify(registration),
     });
     if (!res.ok) throw new Error(`sentinel returned ${res.status}`);
     ctx.log.ok("registered with running sentinel");
   } catch {
+    // Fall back to writing the store directly, so deploy order never matters.
     const { upsertApp } = await import("@factory/sentinel");
     upsertApp(registration);
     ctx.log.ok("sentinel offline - registered directly in its store");
   }
+
+  // 4. Start the app locally with healing env wired to the sentinel.
+  await startApp(ctx, port);
 
   endStage(ctx, "deploy", "passed", `running on http://localhost:${port}`);
 }
@@ -103,6 +111,9 @@ export async function startApp(ctx: Ctx, port: number): Promise<void> {
   const { appDir, cfg, state } = ctx;
   await run("npm", ["install", "--no-audit", "--no-fund"], { cwd: appDir, timeoutMs: 180000 });
   stopApp(appDir);
+  // Read the key straight from the sentinel's store at start time. It is never
+  // written to pipeline state, which lives in the app's own git repo.
+  const { ingestKey } = await import("@factory/sentinel");
   const pid = spawnDetached("npm", ["start"], {
     cwd: appDir,
     env: {
@@ -110,6 +121,7 @@ export async function startApp(ctx: Ctx, port: number): Promise<void> {
       FACTORY_APP_ID: state.app.id,
       SENTINEL_URL: cfg.sentinel.url,
       FACTORY_RELEASE: state.app.releaseSha ?? "",
+      FACTORY_INGEST_KEY: ingestKey(state.app.id) ?? "",
     },
     logFile: path.join(appDir, ".factory", "app.log"),
   });

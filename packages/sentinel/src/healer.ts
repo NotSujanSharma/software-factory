@@ -60,6 +60,9 @@ export async function healIncident(incident: Incident, app: AppRow): Promise<voi
       parse: (raw) => HealOut.parse(raw),
       logFile: path.join(work, "heal-agent.log"),
       scope: `heal:${incident.id}`,
+      appId: app.appId,
+      appName: app.name,
+      stage: "heal",
     });
 
     if (!data.fixed) {

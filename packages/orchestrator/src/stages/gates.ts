@@ -1,7 +1,7 @@
 import { runAgentForJson, type Role } from "@factory/agents";
 import type { Defect, StageName } from "@factory/shared";
 import { outPath, clearOut, GateOut } from "../state.ts";
-import { beginStage, endStage, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, type Ctx } from "./context.ts";
 import { runDefectFix } from "./development.ts";
 
 interface GateSpec {
@@ -39,6 +39,7 @@ export async function gateStage(ctx: Ctx, name: "qa" | "review" | "security"): P
       parse: (raw) => GateOut.parse(raw),
       logFile: ctx.agentLog(name),
       scope: name,
+      ...agentMeta(ctx, name),
     });
 
     const blocking = data.defects.filter((d) => d.severity !== "minor");

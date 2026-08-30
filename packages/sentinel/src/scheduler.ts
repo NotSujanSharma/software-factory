@@ -212,6 +212,7 @@ export async function redeployApp(app: AppRow): Promise<void> {
       FACTORY_APP_ID: app.appId,
       SENTINEL_URL: cfg.sentinel.url,
       FACTORY_RELEASE: sha,
+      FACTORY_INGEST_KEY: app.ingestKey ?? "",
     },
     logFile: path.join(app.dir, ".factory", "app.log"),
   });

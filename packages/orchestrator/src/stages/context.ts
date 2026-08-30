@@ -44,6 +44,11 @@ export function endStage(ctx: Ctx, name: StageName, status: "passed" | "failed" 
   ctx.log[fn](`=== stage ${name}: ${status} ${notes ? `(${notes})` : ""} ===`);
 }
 
+/** Ledger/budget attribution for an agent run belonging to this app. */
+export function agentMeta(ctx: Ctx, stage?: StageName): { appId: string; appName: string; stage?: string } {
+  return { appId: ctx.state.app.id, appName: ctx.state.app.name, stage };
+}
+
 /** Read a small file if present (for prompt context). */
 export function readIfExists(appDir: string, rel: string, maxChars = 12000): string {
   const p = path.join(appDir, rel);

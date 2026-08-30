@@ -1,7 +1,7 @@
 import { runAgentForJson } from "@factory/agents";
 import type { WorkItem } from "@factory/shared";
 import { outPath, clearOut, ValidationOut } from "../state.ts";
-import { beginStage, endStage, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, type Ctx } from "./context.ts";
 import { developmentStage } from "./development.ts";
 import { gateStage } from "./gates.ts";
 
@@ -23,6 +23,7 @@ export async function validationStage(ctx: Ctx): Promise<void> {
       parse: (raw) => ValidationOut.parse(raw),
       logFile: ctx.agentLog("validation"),
       scope: "validation",
+      ...agentMeta(ctx, "validation"),
     });
 
     if (data.passed && data.unmet.length === 0) {

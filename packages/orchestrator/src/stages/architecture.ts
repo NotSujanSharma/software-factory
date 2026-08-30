@@ -1,7 +1,7 @@
 import { runAgentForJson } from "@factory/agents";
 import type { WorkItem } from "@factory/shared";
 import { outPath, clearOut, TasksOut } from "../state.ts";
-import { beginStage, endStage, readIfExists, type Ctx } from "./context.ts";
+import { agentMeta, beginStage, endStage, readIfExists, type Ctx } from "./context.ts";
 
 export async function architectureStage(ctx: Ctx): Promise<void> {
   beginStage(ctx, "architecture");
@@ -21,6 +21,7 @@ export async function architectureStage(ctx: Ctx): Promise<void> {
     outFile: out,
     parse: (raw) => TasksOut.parse(raw),
     logFile: ctx.agentLog("architecture"),
+    ...agentMeta(ctx, "architecture"),
   });
 
   ctx.state.tasks = data.items.map(

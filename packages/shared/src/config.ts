@@ -3,11 +3,68 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FactoryConfig } from "./types.ts";
 
+/**
+ * Shell commands no agent may run, whatever its prompt says.
+ *
+ * The first group is the one that has actually bitten this project: an agent
+ * stopping "the app" by image name takes the orchestrator, the sentinel and every
+ * sibling agent down with it, because they are all `node`.
+ */
+export const DEFAULT_DENY_COMMANDS: string[] = [
+  // Kill by name/image rather than by PID.
+  String.raw`taskkill\s+[^|;&]*\/im\b`,
+  String.raw`\bpkill\b`,
+  String.raw`\bkillall\b`,
+  String.raw`Stop-Process\b[^|;&]*-Name\b`,
+  String.raw`\bkill\s+-9\s+-1\b`,
+  // Destroying the filesystem.
+  String.raw`\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\$HOME|\*)\s*$`,
+  String.raw`\brm\s+-[a-z]*r[a-z]*f?\s+/(\s|$)`,
+  String.raw`\bmkfs\b`,
+  String.raw`\bformat\s+[a-z]:`,
+  String.raw`\bdel\s+/[a-z]*\s+/[a-z]*\s+[a-z]:\\`,
+  // Taking the machine down.
+  String.raw`\bshutdown\b`,
+  String.raw`\breboot\b`,
+  String.raw`\bRestart-Computer\b`,
+  // Publishing or rewriting shared history.
+  String.raw`\bnpm\s+publish\b`,
+  String.raw`\bgit\s+push\b[^|;&]*\s(-f|--force)(\s|$)`,
+];
+
 const DEFAULTS: FactoryConfig = {
   model: "claude-opus-5",
+  models: {},
   workspaceDir: "workspace",
-  sentinel: { port: 4600, url: "http://localhost:4600" },
+  sentinel: {
+    port: 4600,
+    url: "http://localhost:4600",
+    host: "127.0.0.1",
+    requireKey: true,
+    rateLimit: { eventsPerMinute: 120, burst: 60, newIncidentsPerHour: 20 },
+  },
   github: { enabled: true, owner: "", private: true },
+  // Conservative on purpose: a fresh clone must not be able to run up a surprise
+  // bill. Raise these deliberately once you know what a run costs you.
+  budget: {
+    enabled: true,
+    dailyUsd: 25,
+    dailyWindowHours: 24,
+    perAppUsd: 50,
+    perStageUsd: 15,
+    perIncidentUsd: 5,
+    totalUsd: 0,
+    maxTurnsPerRun: 80,
+    maxToolCallsPerRun: 120,
+    onDailyExhausted: "wait",
+  },
+  sandbox: {
+    enabled: true,
+    confineToWorkdir: true,
+    allowPaths: [],
+    denyCommands: DEFAULT_DENY_COMMANDS,
+    blockRemoteExec: true,
+  },
   limits: {
     qaIterations: 3,
     reviewIterations: 2,
@@ -72,7 +129,13 @@ export function loadConfig(): FactoryConfig {
   if (fs.existsSync(file)) {
     user = JSON.parse(fs.readFileSync(file, "utf8"));
   }
-  return deepMerge(deepMerge(DEFAULTS, user), autonomousOverride());
+  const merged = deepMerge(deepMerge(DEFAULTS, user), autonomousOverride());
+
+  // Deny rules are additive rather than replaced. Ordinary deep-merge semantics
+  // would mean that adding one project-specific rule silently drops every built-in
+  // one, which is a very quiet way to lose a safety net.
+  merged.sandbox.denyCommands = [...new Set([...DEFAULT_DENY_COMMANDS, ...(user.sandbox?.denyCommands ?? [])])];
+  return merged;
 }
 
 export function workspaceRoot(cfg: FactoryConfig): string {
