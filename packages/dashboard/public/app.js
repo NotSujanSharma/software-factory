@@ -24,6 +24,10 @@ const state = {
   logName: null,
   logFollow: true,
   connected: false,
+  // Anything the reader picked lives here rather than in the DOM. A live stream
+  // repaints this page every couple of seconds; state kept only in the document
+  // is state the next frame throws away.
+  doc: null,         // { name, text } of the document being read
 };
 
 // ---------------------------------------------------------------- utilities
@@ -350,7 +354,7 @@ function viewAppDetail() {
       <div class="tabs">
         ${tabs.map((t) => `<button class="tab ${state.tab === t ? "active" : ""}" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}
       </div>
-      <div class="card-body ${state.tab === "logs" ? "flush" : ""}">${body(a)}</div>
+      <div class="card-body ${state.tab === "logs" || state.tab === "docs" ? "flush" : ""}">${body(a)}</div>
     </div>
   </div>`;
 }
@@ -427,11 +431,71 @@ function incidentTable(list) {
     </tr>`).join("")}</tbody></table>`;
 }
 
+/**
+ * Markdown, rendered from text that has *already* been escaped.
+ *
+ * These documents are agent output, so the order matters: esc() first, then match
+ * only on the escaped text and emit a fixed set of tags. Nothing here can
+ * reintroduce markup, because by the time a pattern runs there is no live "<"
+ * left in the string.
+ */
+function renderMarkdown(text) {
+  const lines = esc(String(text)).split("\n");
+  const out = [];
+  let inCode = false;
+  let inList = false;
+
+  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+
+  for (const line of lines) {
+    if (/^```/.test(line)) {
+      closeList();
+      out.push(inCode ? "</code></pre>" : `<pre class="md-code"><code>`);
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) { out.push(line); continue; }
+
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      out.push(`<h${heading[1].length} class="md-h">${inline(heading[2])}</h${heading[1].length}>`);
+      continue;
+    }
+    const item = line.match(/^\s*[-*]\s+(.*)$/);
+    if (item) {
+      if (!inList) { out.push("<ul class=\"md-list\">"); inList = true; }
+      out.push(`<li>${inline(item[1])}</li>`);
+      continue;
+    }
+    closeList();
+    if (line.trim() === "") out.push("");
+    else out.push(`<p class="md-p">${inline(line)}</p>`);
+  }
+  closeList();
+  if (inCode) out.push("</code></pre>");
+  return out.join("\n");
+
+  function inline(s) {
+    return s
+      .replace(/`([^`]+)`/g, '<code class="md-inline">$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  }
+}
+
 function tabDocs(a) {
   if (!a.docs.length) return empty("No documents yet", "requirements.md and architecture.md appear once those stages run.");
-  return `<div class="row wrap mb">
-      ${a.docs.map((d) => `<button class="btn sm" data-doc="${esc(d.name)}">${esc(d.name)} <span class="faint">${bytes(d.size)}</span></button>`).join("")}
-    </div><pre class="log-view" id="doc-view" style="max-height:60vh;border:1px solid var(--border);border-radius:var(--radius-sm)">Select a document.</pre>`;
+  const sel = state.doc;
+  return `<div class="doc-wrap">
+    <div class="doc-list">
+      ${a.docs.map((d) => `<div class="log-entry ${sel?.name === d.name ? "active" : ""}" data-doc="${esc(d.name)}">
+        <div class="n">${esc(d.name)}</div><div class="m">${bytes(d.size)}</div></div>`).join("")}
+    </div>
+    <div class="doc-view">${
+      sel ? (sel.text === null ? `<p class="md-p faint">Loading…</p>` : renderMarkdown(sel.text))
+          : `<p class="md-p faint">Select a document.</p>`
+    }</div>
+  </div>`;
 }
 
 function tabCost(a) {
@@ -606,11 +670,36 @@ const VIEWS = {
   settings: { title: "Configuration", render: viewSettings },
 };
 
+/** The markup currently in #content, so an unchanged frame writes nothing. */
+let painted = "";
+
+/**
+ * Paint the current view.
+ *
+ * A live page that rebuilds its whole document every couple of seconds destroys
+ * whatever the reader was doing: the scroll position, the text they were
+ * selecting, and - before the selection moved into `state` - the document they
+ * had open. So this only touches the DOM when the markup actually differs, which
+ * means a tab whose content did not change is never repainted at all, and it
+ * restores the scroll offsets when it does have to write.
+ */
 function render() {
   const view = VIEWS[state.view] ?? VIEWS.overview;
   $("#title").textContent = state.view === "app" ? (state.app ?? "Application") : view.title;
   $("#crumb").textContent = state.view === "app" ? "· application" : "";
-  $("#content").innerHTML = view.render();
+
+  const html = view.render();
+  const el = $("#content");
+  if (html !== painted) {
+    const outer = el.scrollTop;
+    const pane = el.querySelector(".log-view, .doc-view");
+    const inner = pane?.scrollTop ?? 0;
+    el.innerHTML = html;
+    painted = html;
+    el.scrollTop = outer;
+    const next = el.querySelector(".log-view, .doc-view");
+    if (next) next.scrollTop = inner;
+  }
 
   document.querySelectorAll(".nav-item").forEach((el) => {
     const target = state.view === "app" ? "apps" : state.view;
@@ -633,22 +722,54 @@ function updateChrome() {
   $("#f-budget").textContent = d.config.budgets ? "on" : "off";
 }
 
-function go(view, app) {
+/** The URL for wherever we are now, so every view and tab is linkable. */
+function hashFor() {
+  if (state.view !== "app") return `#/${state.view}`;
+  return `#/app/${encodeURIComponent(state.app)}${state.tab && state.tab !== "flow" ? `/${state.tab}` : ""}`;
+}
+
+/** Update the address bar without letting hashchange re-enter and re-render. */
+let ownHash = "";
+function setHash() {
+  ownHash = hashFor();
+  if (location.hash !== ownHash) location.hash = ownHash;
+}
+
+function go(view, app, tab) {
+  const changedApp = app && app !== state.app;
   state.view = view;
   if (app) state.app = app;
   if (view === "app") {
-    state.tab = "flow";
-    state.logName = null;
+    state.tab = tab ?? "flow";
+    if (changedApp) { state.logName = null; state.doc = null; state.detail = null; }
     loadDetail();
   }
-  location.hash = view === "app" ? `#/app/${encodeURIComponent(state.app)}` : `#/${view}`;
+  setHash();
   render();
+}
+
+/** Read one document into state, where a repaint cannot lose it. */
+async function openDoc(name) {
+  state.doc = { name, text: null };
+  render();
+  try {
+    const text = await api(`/api/apps/${encodeURIComponent(state.app)}/doc/${encodeURIComponent(name)}`);
+    if (state.doc?.name === name) { state.doc.text = String(text); render(); }
+  } catch (err) {
+    state.doc = null;
+    toast(err.message, "error");
+    render();
+  }
 }
 
 async function loadDetail() {
   if (!state.app) return;
   try {
     state.detail = await api(`/api/apps/${encodeURIComponent(state.app)}`);
+    // Arriving on the docs tab by link should show a document, not a chooser.
+    if (state.view === "app" && state.tab === "docs" && !state.doc && state.detail.docs?.length) {
+      return openDoc(state.detail.docs[0].name);
+    }
     if (state.view === "app") render();
   } catch (err) {
     toast(`Could not load ${state.app}: ${err.message}`, "error");
@@ -793,20 +914,17 @@ document.addEventListener("click", async (e) => {
   if (t.dataset.tab) {
     state.tab = t.dataset.tab;
     if (state.tab === "logs" && !state.logName) state.logName = "app.log";
+    if (state.tab === "docs" && !state.doc) {
+      const first = state.detail?.docs?.[0]?.name;
+      if (first) return openDoc(first);
+    }
+    setHash();
     return render();
   }
 
   if (t.dataset.log) { state.logName = t.dataset.log; render(); return loadLog(); }
 
-  if (t.dataset.doc) {
-    const el = $("#doc-view");
-    if (el) el.textContent = "Loading…";
-    try {
-      const text = await api(`/api/apps/${encodeURIComponent(state.app)}/doc/${encodeURIComponent(t.dataset.doc)}`);
-      if ($("#doc-view")) $("#doc-view").textContent = String(text);
-    } catch (err) { toast(err.message, "error"); }
-    return;
-  }
+  if (t.dataset.doc) return openDoc(t.dataset.doc);
 
   if (t.dataset.runLog) return showRunLog(t.dataset.runLog);
 
@@ -903,14 +1021,30 @@ function connect() {
   };
 }
 
+const TABS = ["flow", "tasks", "defects", "incidents", "logs", "docs", "cost"];
+
 function readHash() {
-  const m = location.hash.match(/^#\/app\/(.+)$/);
-  if (m) { state.view = "app"; state.app = decodeURIComponent(m[1]); loadDetail(); return; }
+  const m = location.hash.match(/^#\/app\/([^/]+)(?:\/([a-z]+))?$/);
+  if (m) {
+    const app = decodeURIComponent(m[1]);
+    if (app !== state.app) { state.detail = null; state.doc = null; state.logName = null; }
+    state.view = "app";
+    state.app = app;
+    state.tab = TABS.includes(m[2]) ? m[2] : "flow";
+    if (state.tab === "logs" && !state.logName) state.logName = "app.log";
+    loadDetail();
+    return;
+  }
   const view = location.hash.replace(/^#\//, "");
   state.view = VIEWS[view] ? view : "overview";
 }
 
-window.addEventListener("hashchange", () => { readHash(); render(); });
+window.addEventListener("hashchange", () => {
+  // Ignore the echo of our own setHash(); only react to a real navigation.
+  if (location.hash === ownHash) return;
+  readHash();
+  render();
+});
 
 try {
   const saved = localStorage.getItem("factory-theme");
