@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import readline from "node:readline";
-import { redact, type Logger } from "@factory/shared";
+import { redact, which, type Logger } from "@factory/shared";
 import type { Guard } from "./guard.ts";
 
 export interface CodexRunResult {
@@ -35,14 +35,18 @@ interface CodexOptions {
  */
 export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
   return new Promise((resolve, reject) => {
+    const codex = which("codex") ?? "codex";
     const child = spawn(
-      "codex",
+      codex,
       [
         "exec",
         "--json",
         "--sandbox",
         "workspace-write",
+        "--approve-for-me",
         "--ephemeral",
+        "--cd",
+        opts.cwd,
         "-m",
         opts.model,
         `${opts.rolePrompt}\n\n${opts.prompt}\n\nStop after at most ${opts.maxTurns} reasoning turns and write the requested output file.`,
