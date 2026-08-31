@@ -43,6 +43,7 @@ function esc(value) {
 
 function money(n) {
   const v = Number(n ?? 0);
+  if (!v) return "$0";
   return v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(3)}`;
 }
 
@@ -139,7 +140,7 @@ function stageDetail(name, rec, app) {
     if (app.tasks.failed) bits.push(`${app.tasks.failed} failed`);
   }
   if (name === "deploy" && app?.port && rec.status === "passed") bits.push(`port ${app.port}`);
-  if (rec.iterations > 1) bits.push(`<em>×${rec.iterations} iterations</em>`);
+  if (rec.iterations > 1) bits.push(`<span class="aside">×${rec.iterations} iterations</span>`);
   return bits.join(" · ");
 }
 
@@ -303,10 +304,10 @@ function viewApps() {
   const d = state.data;
   if (!d) return "";
   if (!d.apps.length) {
-    return `<div class="view"><div class="card"><div class="card-body">${empty(
-      "▦", "No applications yet",
+    return `<div class="view">${empty(
+      "No applications yet",
       "Describe what you want built. The factory chooses the stack, writes it, tests it, deploys it and keeps it healthy.",
-      `<button class="btn primary" id="empty-new">New build</button>`)}</div></div></div>`;
+      `<button class="btn primary" id="empty-new">New build</button>`)}</div>`;
   }
 
   return `<div class="view"><div class="grid two">
@@ -573,22 +574,22 @@ function viewRuns() {
   const d = state.data;
   if (!d) return "";
   if (!d.runs.length) {
-    return `<div class="view"><div class="card"><div class="card-body">${empty(
-      "▶", "No pipeline runs yet", "Runs started from this dashboard appear here with their live output.",
-      `<button class="btn primary" id="empty-new">New build</button>`)}</div></div></div>`;
+    return `<div class="view">${empty(
+      "No pipeline runs yet", "Runs started from this dashboard appear here with their live output.",
+      `<button class="btn primary" id="empty-new">New build</button>`)}</div>`;
   }
   return `<div class="view"><div class="card">
     <div class="card-head"><h2>Pipeline runs</h2></div>
     <div class="card-body flush">
       <table><thead><tr><th>App</th><th>Mode</th><th>Status</th><th>Started</th><th>PID</th><th></th></tr></thead><tbody>
-        ${d.runs.map((r) => `<tr>
+        ${d.runs.map((r) => `<tr class="clickable" data-run-log="${esc(r.id)}">
           <td><strong>${esc(r.app)}</strong>${r.prompt ? `<div class="faint small truncate">${esc(r.prompt)}</div>` : ""}</td>
           <td class="faint">${esc(r.mode)}</td>
           <td>${r.finishedAt ? pill("idle", "finished") : pill("running")}</td>
           <td class="faint nowrap">${ago(r.startedAt)}</td>
           <td class="mono faint">${r.pid}</td>
           <td class="row" style="justify-content:flex-end">
-            <button class="btn sm" data-run-log="${esc(r.id)}">Log</button>
+            <button class="btn sm" data-app="${esc(r.app)}">Open app</button>
             ${!r.finishedAt ? `<button class="btn sm danger" data-stop-run="${esc(r.id)}">Stop</button>` : ""}
           </td>
         </tr>`).join("")}
