@@ -89,39 +89,82 @@ function bar(percent, tone = "") {
   return `<div class="bar"><span class="${tone}" style="width:${width}%"></span></div>`;
 }
 
-/** The pipeline flow: the view that answers "where is this build?" at a glance. */
-function flow(stages, compact = false) {
-  const byName = new Map((stages ?? []).map((s) => [s.name, s]));
-  const current = (stages ?? []).find((s) => s.status === "running")
-    ?? (stages ?? []).find((s) => s.status === "failed" || s.status === "needs_human")
-    ?? (stages ?? []).find((s) => s.status !== "passed");
+const MARK = { passed: "✓", running: "●", failed: "✕", needs_human: "!", pending: "·" };
 
-  const nodes = STAGES.map((name, i) => {
-    const rec = byName.get(name) ?? { status: "pending", iterations: 0 };
-    const isCurrent = current?.name === name;
-    const mark = rec.status === "passed" ? "✓"
-      : rec.status === "failed" ? "✕"
-      : rec.status === "needs_human" ? "!"
-      : rec.status === "running" ? "●" : String(i + 1);
-    const prev = i > 0 ? byName.get(STAGES[i - 1]) : null;
-    const line = i > 0 ? `<div class="flow-line ${prev?.status === "passed" ? "done" : ""}"></div>` : "";
-    const iters = rec.iterations > 1 ? ` <span class="faint">×${rec.iterations}</span>` : "";
-    return `${line}<div class="flow-node ${isCurrent ? "is-current" : ""}" title="${esc(name)}: ${esc(rec.status)}">
-      <div class="flow-dot ${esc(rec.status)}">${mark}</div>
-      ${compact ? "" : `<div class="flow-label">${esc(name)}${iters}</div>`}
-    </div>`;
-  }).join("");
+/** Stage names are capitalized in CSS, which would render "qa" as "Qa". */
+const STAGE_LABEL = { qa: "QA" };
 
-  const note = current?.notes
-    ? `<div class="flow-note ${current.status === "failed" ? "failed" : current.status === "needs_human" ? "warn" : ""}">
-         <strong>${esc(current.name)}</strong> — ${esc(current.notes)}
-       </div>`
-    : "";
-  return `<div class="flow">${nodes}</div>${compact ? "" : note}`;
+/** Elapsed time for one stage, from the timestamps the state file already keeps. */
+function duration(rec) {
+  if (!rec?.startedAt) return "";
+  const end = rec.finishedAt ? Date.parse(rec.finishedAt) : Date.now();
+  const secs = (end - Date.parse(rec.startedAt)) / 1000;
+  if (!Number.isFinite(secs) || secs < 0) return "";
+  if (secs < 60) return `${Math.round(secs)}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m${String(Math.round(secs % 60)).padStart(2, "0")}`;
+  return `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}`;
 }
 
-function empty(icon, title, body, action = "") {
-  return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${esc(title)}</h3><p>${esc(body)}</p>${action}</div>`;
+/** The stage that most deserves a reader's attention right now. */
+function currentStage(stages) {
+  const list = stages ?? [];
+  return list.find((s) => s.status === "running")
+    ?? list.find((s) => s.status === "failed" || s.status === "needs_human")
+    ?? list.find((s) => s.status !== "passed");
+}
+
+/**
+ * The one line of context that makes a stage row worth reading. A note from the
+ * stage itself always wins - it is the only text written about this specific run.
+ */
+function stageDetail(name, rec, app) {
+  if (rec.notes) return esc(rec.notes);
+  const bits = [];
+  if (name === "architecture" && app?.stack?.label && rec.status === "passed") bits.push(esc(app.stack.label));
+  if (name === "development" && app?.tasks?.total) {
+    bits.push(`${app.tasks.done}/${app.tasks.total} tasks`);
+    if (app.tasks.failed) bits.push(`${app.tasks.failed} failed`);
+  }
+  if (name === "deploy" && app?.port && rec.status === "passed") bits.push(`port ${app.port}`);
+  if (rec.iterations > 1) bits.push(`<em>×${rec.iterations} iterations</em>`);
+  return bits.join(" · ");
+}
+
+/**
+ * The pipeline, set as a ledger: one line per stage, with the time it took and
+ * what it did. This is the most distinctive thing the factory has, so it gets the
+ * room to say something rather than being nine dots in a row.
+ */
+function stageLedger(stages, app) {
+  const byName = new Map((stages ?? []).map((s) => [s.name, s]));
+  const current = currentStage(stages);
+
+  return `<div class="ledger">${STAGES.map((name) => {
+    const rec = byName.get(name) ?? { name, status: "pending", iterations: 0 };
+    const isCurrent = current?.name === name;
+    const tone = rec.status === "failed" ? "failed-row" : rec.status === "needs_human" ? "warn-row" : "";
+    return `<div class="ledger-row ${isCurrent ? "is-current" : ""} ${rec.status === "pending" ? "is-pending" : ""} ${tone}"
+                 data-stage="${esc(name)}" title="${esc(name)}: ${esc(rec.status)}">
+      <div class="ledger-mark ${esc(rec.status)}">${MARK[rec.status] ?? "·"}</div>
+      <div class="ledger-name">${esc(STAGE_LABEL[name] ?? name)}</div>
+      <div class="ledger-time">${esc(duration(rec))}</div>
+      <div class="ledger-detail">${stageDetail(name, rec, app)}</div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+/** The compact form for a card in a list: one segment per stage, no words. */
+function stageRail(stages) {
+  const byName = new Map((stages ?? []).map((s) => [s.name, s]));
+  return `<div class="rail">${STAGES.map((name) => {
+    const status = byName.get(name)?.status ?? "pending";
+    return `<span class="rail-seg ${esc(status)}" title="${esc(name)}: ${esc(status)}"></span>`;
+  }).join("")}</div>`;
+}
+
+function empty(title, body, action = "") {
+  return `<div class="empty"><h3>${esc(title)}</h3><p>${esc(body)}</p>${action}</div>`;
 }
 
 // ---------------------------------------------------------------- views
@@ -186,17 +229,18 @@ function viewOverview() {
 
     ${active.length ? `
     <div class="card mb">
-      <div class="card-head"><h2>In progress</h2></div>
+      <div class="card-head"><h2>In progress</h2>
+        <span class="sub">${active.length === 1 ? "one build running" : `${active.length} builds running`}</span></div>
       <div class="card-body">
         ${active.map((a) => `
-          <div style="margin-bottom:18px" data-app="${esc(a.name)}" class="clickable">
-            <div class="row mb">
-              <strong>${esc(a.name)}</strong>
+          <div class="mb">
+            <div class="row mb clickable" data-app="${esc(a.name)}">
+              <span class="app-name">${esc(a.name)}</span>
               ${pill(a.current?.status ?? "running")}
               <span class="faint small">${esc(a.run.mode)} · started ${ago(a.run.startedAt)}</span>
-              <span class="right faint small">${esc(a.stack.label)}</span>
+              <span class="right faint small mono">${money(a.costUsd)}</span>
             </div>
-            ${flow(a.stages)}
+            ${stageLedger(a.stages, a)}
           </div>`).join("")}
       </div>
     </div>` : ""}
@@ -208,8 +252,8 @@ function viewOverview() {
         </div>
         <div class="card-body flush">
           ${d.apps.length === 0
-            ? empty("▦", "No applications yet", "Describe what you want built and the factory will take it from there.",
-                `<button class="btn primary" id="empty-new">＋ New build</button>`)
+            ? empty("No applications yet", "Describe what you want built and the factory will take it from there.",
+                `<button class="btn primary" id="empty-new">New build</button>`)
             : `<table><tbody>${d.apps.slice(0, 8).map((a) => `
                 <tr class="clickable" data-app="${esc(a.name)}">
                   <td><strong>${esc(a.name)}</strong><div class="faint small">${esc(a.stack.label)}</div></td>
@@ -227,7 +271,7 @@ function viewOverview() {
         </div>
         <div class="card-body flush">
           ${d.incidents.recent.length === 0
-            ? empty("✓", "No incidents", "Nothing has crashed. Errors reported by a running app appear here.")
+            ? empty("No incidents", "Nothing has crashed. Errors reported by a running app appear here.")
             : `<table><tbody>${d.incidents.recent.slice(0, 8).map((i) => `
                 <tr class="clickable" data-incident="${i.id}">
                   <td class="faint mono">#${i.id}</td>
@@ -248,7 +292,7 @@ function viewApps() {
     return `<div class="view"><div class="card"><div class="card-body">${empty(
       "▦", "No applications yet",
       "Describe what you want built. The factory chooses the stack, writes it, tests it, deploys it and keeps it healthy.",
-      `<button class="btn primary" id="empty-new">＋ New build</button>`)}</div></div></div>`;
+      `<button class="btn primary" id="empty-new">New build</button>`)}</div></div></div>`;
   }
 
   return `<div class="view"><div class="grid two">
@@ -260,12 +304,12 @@ function viewApps() {
           <span class="right faint small">${ago(a.updatedAt)}</span>
         </div>
         <div class="app-prompt">${esc(a.prompt)}</div>
-        ${flow(a.stages, true)}
+        ${stageRail(a.stages)}
         <div class="app-meta">
-          <span class="item">◆ ${esc(a.stack.label)}</span>
-          <span class="item">✓ ${a.tasks.done}/${a.tasks.total} tasks</span>
-          ${a.port ? `<span class="item">${a.serving ? "◉" : "○"} :${a.port}</span>` : ""}
-          ${a.incidents.open + a.incidents.healing > 0 ? `<span class="item" style="color:var(--warn)">⚠ ${a.incidents.open + a.incidents.healing}</span>` : ""}
+          <span class="item">${esc(a.stack.label)}</span>
+          <span class="item">${a.tasks.done}/${a.tasks.total} tasks</span>
+          ${a.port ? `<span class="item">${a.serving ? "serving" : "stopped"} :${a.port}</span>` : ""}
+          ${a.incidents.open + a.incidents.healing > 0 ? `<span class="item" style="color:var(--warn)">${a.incidents.open + a.incidents.healing} open</span>` : ""}
           <span class="item right">${money(a.costUsd)}</span>
         </div>
       </div>`).join("")}
@@ -288,20 +332,20 @@ function viewAppDetail() {
       <div class="card-body">
         <div class="row wrap mb">
           ${a.run ? pill("running", `${a.run.mode} running`) : a.current ? pill(a.current.status, a.current.stage) : pill("done", "complete")}
-          <span class="faint small">${esc(a.stack.label)}${a.stack.framework ? ` · ${esc(a.stack.framework)}` : ""}</span>
-          ${a.port ? `<span class="faint small">${a.serving ? "◉ serving on" : "○ stopped ·"} <a href="http://localhost:${a.port}" target="_blank" rel="noreferrer">:${a.port}</a></span>` : ""}
-          ${a.repoUrl ? `<a class="small" href="https://github.com/${esc(a.repoUrl)}" target="_blank" rel="noreferrer">${esc(a.repoUrl)} ↗</a>` : `<span class="faint small">local only</span>`}
+          <span class="faint small">${esc(a.stack.label)}${a.stack.framework && !a.stack.label.includes(a.stack.framework) ? ` · ${esc(a.stack.framework)}` : ""}</span>
+          ${a.port ? `<span class="faint small">${a.serving ? "serving on" : "stopped ·"} <a href="http://localhost:${a.port}" target="_blank" rel="noreferrer">:${a.port}</a></span>` : ""}
+          ${a.repoUrl ? `<a class="small" href="https://github.com/${esc(a.repoUrl)}" target="_blank" rel="noreferrer">${esc(a.repoUrl)}</a>` : `<span class="faint small">local only</span>`}
           <span class="right row">
             ${a.run
-              ? `<button class="btn sm danger" data-stop-run="${esc(a.run.id)}">■ Stop run</button>`
-              : `<button class="btn sm" data-start="resume">▶ Resume</button>
-                 <button class="btn sm" data-start="auto">⟳ Autonomous</button>
-                 <button class="btn sm" data-start="evolve">✦ Evolve</button>`}
-            ${a.serving ? `<button class="btn sm" data-stop-app="1">■ Stop app</button>` : ""}
-            <button class="btn sm" data-rearm="1" title="Put parked stages back on the board">⤾ Re-arm</button>
+              ? `<button class="btn sm danger" data-stop-run="${esc(a.run.id)}">Stop run</button>`
+              : `<button class="btn sm" data-start="resume">Resume</button>
+                 <button class="btn sm" data-start="auto">Autonomous</button>
+                 <button class="btn sm" data-start="evolve">Evolve</button>`}
+            ${a.serving ? `<button class="btn sm" data-stop-app="1">Stop app</button>` : ""}
+            <button class="btn sm" data-rearm="1" title="Put parked stages back on the board">Re-arm</button>
           </span>
         </div>
-        <div class="dim" style="font-size:12.5px">${esc(a.prompt)}</div>
+        <div class="standfirst">${esc(a.prompt)}</div>
       </div>
       <div class="tabs">
         ${tabs.map((t) => `<button class="tab ${state.tab === t ? "active" : ""}" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}
@@ -313,38 +357,37 @@ function viewAppDetail() {
 
 function tabFlow(a) {
   const done = a.stages.filter((s) => s.status === "passed").length;
+  const current = currentStage(a.stages);
+  // The ledger already carries status, duration, runs and notes for every stage,
+  // so the old stage-history table said the same thing again in a worse form.
+  const note = current?.notes
+    ? `<div class="flow-note ${current.status === "failed" ? "failed" : current.status === "needs_human" ? "warn" : ""}">
+         <strong>${esc(current.name)}</strong> — ${esc(current.notes)}</div>`
+    : "";
+
   return `
-    ${flow(a.stages)}
+    ${stageLedger(a.stages, a)}
+    ${note}
     <div class="grid stats mt">
-      <div class="stat"><div class="stat-label">Stages</div><div class="stat-value">${done}/${a.stages.length}</div></div>
-      <div class="stat"><div class="stat-label">Tasks</div><div class="stat-value">${a.tasks.done}/${a.tasks.total}</div>
+      <div class="stat"><div class="stat-label">Stages</div><div class="stat-value">${done}<span class="faint">/${a.stages.length}</span></div></div>
+      <div class="stat"><div class="stat-label">Tasks</div><div class="stat-value">${a.tasks.done}<span class="faint">/${a.tasks.total}</span></div>
         <div class="stat-meta">${a.tasks.failed} failed · ${a.tasks.pending} pending</div></div>
       <div class="stat"><div class="stat-label">Incidents</div><div class="stat-value ${a.incidents.length ? "warn" : ""}">${a.incidents.length}</div></div>
       <div class="stat"><div class="stat-label">Spent</div><div class="stat-value">${money(a.costUsd)}</div></div>
     </div>
-    <div class="mt"><h3 style="font-size:12.5px;margin:16px 0 8px">Stage history</h3>
-    <table><thead><tr><th>Stage</th><th>Status</th><th>Runs</th><th>Notes</th><th>Finished</th></tr></thead><tbody>
-      ${a.stages.map((s) => `<tr>
-        <td><strong>${esc(s.name)}</strong></td>
-        <td>${pill(s.status)}</td>
-        <td class="num">${s.iterations}</td>
-        <td class="dim truncate">${esc(s.notes ?? "")}</td>
-        <td class="faint nowrap">${s.finishedAt ? ago(s.finishedAt) : "—"}</td>
-      </tr>`).join("")}
-    </tbody></table></div>
     ${a.criteria?.length ? `
-      <h3 style="font-size:12.5px;margin:22px 0 8px">Acceptance criteria</h3>
+      <div class="subhead">Acceptance criteria</div>
       <table><tbody>${a.criteria.map((c) => `
-        <tr><td class="mono faint" style="width:60px">${esc(c.id)}</td><td>${esc(c.description)}</td></tr>`).join("")}
+        <tr><td class="mono faint" style="width:64px">${esc(c.id)}</td><td>${esc(c.description)}</td></tr>`).join("")}
       </tbody></table>` : ""}
     ${a.assumptions?.length ? `
-      <h3 style="font-size:12.5px;margin:22px 0 8px">Assumptions</h3>
-      <ul class="dim" style="font-size:12.5px;padding-left:18px;margin:0">
+      <div class="subhead">Assumptions the factory made</div>
+      <ul class="dim" style="font-size:13px;padding-left:18px;margin:0">
         ${a.assumptions.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}`;
 }
 
 function tabTasks(a) {
-  if (!a.taskList.length) return empty("▦", "No tasks yet", "The architect stage produces the work breakdown.");
+  if (!a.taskList.length) return empty("No tasks yet", "The architect stage produces the work breakdown.");
   return `<table><thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Depends on</th></tr></thead><tbody>
     ${a.taskList.map((t) => `<tr>
       <td class="mono faint">${esc(t.id)}</td>
@@ -355,7 +398,7 @@ function tabTasks(a) {
 }
 
 function tabDefects(a) {
-  if (!a.defects.length) return empty("✓", "No defects recorded", "Findings from QA, review, security and validation appear here.");
+  if (!a.defects.length) return empty("No defects recorded", "Findings from QA, review, security and validation appear here.");
   return `<table><thead><tr><th>Source</th><th>Severity</th><th>Title</th><th>Detail</th></tr></thead><tbody>
     ${a.defects.map((d) => `<tr>
       <td class="faint">${esc(d.source)}</td>
@@ -366,7 +409,7 @@ function tabDefects(a) {
 }
 
 function tabIncidents(a) {
-  if (!a.incidents.length) return empty("✓", "No incidents", "Runtime errors reported by this app appear here and trigger healing.");
+  if (!a.incidents.length) return empty("No incidents", "Runtime errors reported by this app appear here and trigger healing.");
   return incidentTable(a.incidents);
 }
 
@@ -385,7 +428,7 @@ function incidentTable(list) {
 }
 
 function tabDocs(a) {
-  if (!a.docs.length) return empty("▤", "No documents yet", "requirements.md and architecture.md appear once those stages run.");
+  if (!a.docs.length) return empty("No documents yet", "requirements.md and architecture.md appear once those stages run.");
   return `<div class="row wrap mb">
       ${a.docs.map((d) => `<button class="btn sm" data-doc="${esc(d.name)}">${esc(d.name)} <span class="faint">${bytes(d.size)}</span></button>`).join("")}
     </div><pre class="log-view" id="doc-view" style="max-height:60vh;border:1px solid var(--border);border-radius:var(--radius-sm)">Select a document.</pre>`;
@@ -396,7 +439,7 @@ function tabCost(a) {
   const max = Math.max(1, ...all.map((g) => g.costUsd));
 
   const table = (list, label) => !list?.length ? "" : `
-    <h3 style="font-size:12.5px;margin:16px 0 8px">${label}</h3>
+    <div class="subhead">${label}</div>
     <table><tbody>${list.map((g) => `<tr>
       <td style="width:130px">${esc(g.key)}</td>
       <td>${bar((g.costUsd / max) * 100)}</td>
@@ -424,7 +467,7 @@ function tabLogs(a) {
         <span class="mono faint">${esc(state.logName ?? "select a log")}</span>
         <span class="right row">
           <label class="row small faint" style="gap:5px"><input type="checkbox" id="follow" ${state.logFollow ? "checked" : ""}> follow</label>
-          <button class="btn sm ghost" id="log-refresh">⟳</button>
+          <button class="btn sm ghost" id="log-refresh">Refresh</button>
         </span>
       </div>
       <pre class="log-view" id="log-view">${state.logName ? "Loading…" : "Select a log to view."}</pre>
@@ -446,7 +489,7 @@ function viewIncidents() {
       <span class="sub">deduplicated by error fingerprint</span></div>
       <div class="card-body flush">
         ${list.length ? incidentTable(list)
-          : empty("✓", "No incidents", "When a deployed app throws, it is fingerprinted, deduplicated and healed here.")}
+          : empty("No incidents", "When a deployed app throws, it is fingerprinted, deduplicated and healed here.")}
       </div>
     </div>
   </div>`;
@@ -458,7 +501,7 @@ function viewRuns() {
   if (!d.runs.length) {
     return `<div class="view"><div class="card"><div class="card-body">${empty(
       "▶", "No pipeline runs yet", "Runs started from this dashboard appear here with their live output.",
-      `<button class="btn primary" id="empty-new">＋ New build</button>`)}</div></div></div>`;
+      `<button class="btn primary" id="empty-new">New build</button>`)}</div></div></div>`;
   }
   return `<div class="view"><div class="card">
     <div class="card-head"><h2>Pipeline runs</h2></div>
@@ -673,7 +716,7 @@ function openModal(title, body, footer) {
     <div class="overlay" id="overlay">
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-head"><h2>${title}</h2>
-          <span class="right"><button class="btn sm ghost" id="modal-x">✕</button></span></div>
+          <span class="right"><button class="btn sm ghost" id="modal-x">Close</button></span></div>
         <div class="modal-body">${body}</div>
         ${footer === "" ? "" : `<div class="modal-foot">${footer}</div>`}
       </div>
