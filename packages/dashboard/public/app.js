@@ -28,6 +28,7 @@ const state = {
   // repaints this page every couple of seconds; state kept only in the document
   // is state the next frame throws away.
   doc: null,         // { name, text } of the document being read
+  drawer: null,      // { kind, id, ... } of the detail panel that is open
 };
 
 // ---------------------------------------------------------------- utilities
@@ -98,6 +99,13 @@ const MARK = { passed: "✓", running: "●", failed: "✕", needs_human: "!", p
 /** Stage names are capitalized in CSS, which would render "qa" as "Qa". */
 const STAGE_LABEL = { qa: "QA" };
 
+/**
+ * The agent contract a stage writes, where it is not simply `<stage>.json`.
+ * The architect writes the task DAG as tasks.json and development reports as
+ * dev-report.json, so a plain name lookup would find neither.
+ */
+const STAGE_OUT = { architecture: "tasks", development: "dev-report" };
+
 /** Elapsed time for one stage, from the timestamps the state file already keeps. */
 function duration(rec) {
   if (!rec?.startedAt) return "";
@@ -166,6 +174,8 @@ function stageRail(stages) {
     return `<span class="rail-seg ${esc(status)}" title="${esc(name)}: ${esc(status)}"></span>`;
   }).join("")}</div>`;
 }
+
+const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
 
 function empty(title, body, action = "") {
   return `<div class="empty"><h3>${esc(title)}</h3><p>${esc(body)}</p>${action}</div>`;
@@ -393,7 +403,7 @@ function tabFlow(a) {
 function tabTasks(a) {
   if (!a.taskList.length) return empty("No tasks yet", "The architect stage produces the work breakdown.");
   return `<table><thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Depends on</th></tr></thead><tbody>
-    ${a.taskList.map((t) => `<tr>
+    ${a.taskList.map((t) => `<tr class="clickable" data-task="${esc(t.id)}">
       <td class="mono faint">${esc(t.id)}</td>
       <td><strong>${esc(t.title)}</strong><div class="faint small truncate">${esc(t.description ?? "")}</div></td>
       <td>${pill(t.status)}</td>
@@ -404,7 +414,7 @@ function tabTasks(a) {
 function tabDefects(a) {
   if (!a.defects.length) return empty("No defects recorded", "Findings from QA, review, security and validation appear here.");
   return `<table><thead><tr><th>Source</th><th>Severity</th><th>Title</th><th>Detail</th></tr></thead><tbody>
-    ${a.defects.map((d) => `<tr>
+    ${a.defects.map((d, i) => `<tr class="clickable" data-defect="${i}">
       <td class="faint">${esc(d.source)}</td>
       <td><span class="pill sev-${esc(d.severity)}">${esc(d.severity)}</span></td>
       <td><strong>${esc(d.title)}</strong></td>
@@ -419,7 +429,7 @@ function tabIncidents(a) {
 
 function incidentTable(list) {
   return `<table><thead><tr><th>#</th><th>Status</th><th>Error</th><th>Seen</th><th>Attempts</th><th>Fix</th><th></th></tr></thead><tbody>
-    ${list.map((i) => `<tr>
+    ${list.map((i) => `<tr class="clickable" data-incident="${i.id}">
       <td class="mono faint">${i.id}</td>
       <td>${pill(i.status)}</td>
       <td><strong>${esc(i.sampleEvent?.type ?? "Error")}</strong>
@@ -596,7 +606,7 @@ function viewCost() {
 
   const group = (list, label) => !list.length ? "" : `
     <div class="card"><div class="card-head"><h2>${label}</h2></div><div class="card-body flush">
-      <table><tbody>${list.map((g) => `<tr>
+      <table><tbody>${list.map((g) => `<tr ${label === "By application" ? `class="clickable" data-app="${esc(g.key)}"` : ""}>
         <td style="width:150px">${esc(g.key)}</td>
         <td>${bar((g.costUsd / max) * 100)}</td>
         <td class="num nowrap">${money(g.costUsd)}</td>
@@ -707,6 +717,9 @@ function render() {
   });
 
   if (state.view === "app" && state.tab === "logs" && state.logName) loadLog();
+  // An open drawer tracks the same data, so a stage that finishes while you are
+  // reading it updates in place rather than going stale behind the panel.
+  renderDrawer();
   updateChrome();
 }
 
@@ -828,6 +841,201 @@ function showRunLog(id) {
   modalCleanup = () => clearInterval(timer);
 }
 
+// ---------------------------------------------------------------- drawer
+//
+// Every list on this page used to be a dead end: a stage, an incident, a task or
+// a defect could be read only in the one truncated row it occupied. The drawer is
+// the destination for all four. It lives outside #content so the memoized repaint
+// of the main view neither rebuilds it nor loses its scroll.
+
+/** Transcripts an app has for one stage: `<stage>-<timestamp>.log`. */
+function logsForStage(a, stage) {
+  return (a.logs ?? []).filter((l) => l.name.startsWith(`${stage}-`));
+}
+
+function kv(rows) {
+  const shown = rows.filter(([, v]) => v !== undefined && v !== null && v !== "");
+  if (!shown.length) return "";
+  return `<dl class="kv">${shown.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
+
+function drawerStage(a) {
+  const stage = state.drawer.id;
+  const rec = (a.stages ?? []).find((s) => s.name === stage) ?? { status: "pending", iterations: 0 };
+  const transcripts = logsForStage(a, stage);
+  const spend = (a.spendByStage ?? []).find((g) => g.key === stage);
+  const defects = (a.defects ?? []).filter((d) => d.source === stage);
+  const out = state.drawer.out;
+
+  return `
+    ${kv([
+      ["Status", pill(rec.status)],
+      ["Elapsed", duration(rec) ? `<span class="mono">${esc(duration(rec))}</span>` : "—"],
+      ["Runs", `${rec.iterations}${rec.iterations > 1 ? " <span class=\"faint\">(the gate sent work back)</span>" : ""}`],
+      ["Started", rec.startedAt ? esc(ago(rec.startedAt)) : ""],
+      ["Finished", rec.finishedAt ? esc(ago(rec.finishedAt)) : ""],
+      ["Cost", spend ? `<span class="mono">${money(spend.costUsd)}</span> <span class="faint">over ${spend.runs} agent run${spend.runs === 1 ? "" : "s"}</span>` : ""],
+    ])}
+    ${rec.notes ? `<div class="flow-note ${rec.status === "failed" ? "failed" : rec.status === "needs_human" ? "warn" : ""}">${esc(rec.notes)}</div>` : ""}
+
+    ${defects.length ? `<div class="subhead">Defects this stage found</div>
+      ${defects.map((d) => `<div class="drawer-item">
+        <div class="row"><span class="pill sev-${esc(d.severity)}">${esc(d.severity)}</span>
+          <strong>${esc(d.title)}</strong></div>
+        <p class="drawer-text">${esc(d.detail ?? "")}</p>
+        ${d.suggestedFix ? `<p class="drawer-text faint">Suggested: ${esc(d.suggestedFix)}</p>` : ""}
+      </div>`).join("")}` : ""}
+
+    ${out ? `<div class="subhead">${esc(out.name)}.json <span class="faint">— what the agent returned</span></div>
+      <pre class="md-code">${esc(out.text ?? "Loading…")}</pre>` : ""}
+
+    <div class="subhead">Agent transcripts</div>
+    ${transcripts.length
+      ? `<div class="drawer-list">${transcripts.map((l) => `
+          <div class="log-entry" data-drawer-log="${esc(l.name)}">
+            <div class="n">${esc(l.name)}</div>
+            <div class="m">${bytes(l.size)} · ${ago(l.modified)}</div>
+          </div>`).join("")}</div>
+         <p class="drawer-text faint">Opens in the Logs tab.</p>`
+      : `<p class="drawer-text faint">No transcript recorded for this stage yet.</p>`}`;
+}
+
+function drawerIncident() {
+  const i = state.drawer.data;
+  if (!i) return `<p class="drawer-text faint">Loading…</p>`;
+  const ev = i.sampleEvent ?? {};
+  return `
+    ${kv([
+      ["Status", pill(i.status)],
+      ["Occurrences", `${i.count}`],
+      ["First seen", esc(ago(i.firstSeen))],
+      ["Last seen", esc(ago(i.lastSeen))],
+      ["Heal attempts", `${i.attempts}${i.rearms ? ` <span class="faint">· re-armed ${i.rearms}×</span>` : ""}`],
+      ["Fingerprint", `<span class="mono">${esc(i.fingerprint)}</span>`],
+      ["Release", ev.release ? `<span class="mono">${esc(ev.release)}</span>` : ""],
+      ["Fix", i.prUrl ? `<a href="${esc(i.prUrl)}" target="_blank" rel="noreferrer">pull request</a>`
+        : i.branch ? `<span class="mono">${esc(i.branch)}</span>` : ""],
+    ])}
+    ${i.lastNote ? `<div class="flow-note">${esc(i.lastNote)}</div>` : ""}
+
+    <div class="subhead">${esc(ev.type ?? "Error")}</div>
+    <p class="drawer-text">${esc(ev.message ?? "")}</p>
+
+    ${ev.stack ? `<div class="subhead">Stack</div><pre class="md-code">${esc(ev.stack)}</pre>` : ""}
+    ${ev.context && Object.keys(ev.context).length
+      ? `<div class="subhead">Request context</div><pre class="md-code">${esc(JSON.stringify(ev.context, null, 2))}</pre>` : ""}
+    ${i.status === "failed" ? `<button class="btn" data-retry="${i.id}">Re-arm this incident</button>` : ""}`;
+}
+
+function drawerTask(a) {
+  const t = (a.taskList ?? []).find((x) => x.id === state.drawer.id);
+  if (!t) return `<p class="drawer-text faint">This task is no longer in the plan.</p>`;
+  const deps = (t.dependsOn ?? []).map((id) => (a.taskList ?? []).find((x) => x.id === id)).filter(Boolean);
+  const blocks = (a.taskList ?? []).filter((x) => (x.dependsOn ?? []).includes(t.id));
+  const link = (x) => `<div class="drawer-item clickable" data-task="${esc(x.id)}">
+      <div class="row"><span class="mono faint">${esc(x.id)}</span> ${pill(x.status)}</div>
+      <div>${esc(x.title)}</div></div>`;
+
+  return `
+    ${kv([["Status", pill(t.status)], ["ID", `<span class="mono">${esc(t.id)}</span>`]])}
+    <div class="subhead">What it covers</div>
+    <p class="drawer-text">${esc(t.description ?? "")}</p>
+    ${t.acceptance?.length ? `<div class="subhead">Acceptance</div>
+      <ul class="md-list">${t.acceptance.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+    ${deps.length ? `<div class="subhead">Waits on</div>${deps.map(link).join("")}` : ""}
+    ${blocks.length ? `<div class="subhead">Blocks</div>${blocks.map(link).join("")}` : ""}`;
+}
+
+function drawerDefect(a) {
+  const d = (a.defects ?? [])[state.drawer.id];
+  if (!d) return `<p class="drawer-text faint">This defect is no longer recorded.</p>`;
+  return `
+    ${kv([["Severity", `<span class="pill sev-${esc(d.severity)}">${esc(d.severity)}</span>`],
+          ["Found by", esc(d.source)]])}
+    <div class="subhead">${esc(d.title)}</div>
+    <p class="drawer-text">${esc(d.detail ?? "")}</p>
+    ${d.suggestedFix ? `<div class="subhead">Suggested fix</div><p class="drawer-text">${esc(d.suggestedFix)}</p>` : ""}`;
+}
+
+const DRAWERS = {
+  stage: { title: (d) => `${STAGE_LABEL[d.id] ?? cap(d.id)} stage`, render: drawerStage },
+  incident: { title: (d) => `Incident #${d.id}`, render: drawerIncident },
+  task: { title: (d) => `Task ${d.id}`, render: drawerTask },
+  defect: { title: () => "Defect", render: drawerDefect },
+};
+
+let drawerPainted = "";
+
+function renderDrawer() {
+  const host = $("#drawer-host");
+  const d = state.drawer;
+  if (!d) {
+    if (drawerPainted !== "") { host.innerHTML = ""; drawerPainted = ""; }
+    return;
+  }
+  const spec = DRAWERS[d.kind];
+  const html = `
+    <div class="drawer-mask" id="drawer-mask"></div>
+    <aside class="drawer" role="dialog" aria-modal="true">
+      <div class="drawer-head">
+        <h2>${esc(spec.title(d))}</h2>
+        <span class="right"><button class="btn sm ghost" id="drawer-x">Close</button></span>
+      </div>
+      <div class="drawer-body">${spec.render(state.detail ?? {})}</div>
+    </aside>`;
+  if (html === drawerPainted) return;
+  const body = host.querySelector(".drawer-body");
+  const scroll = body?.scrollTop ?? 0;
+  host.innerHTML = html;
+  drawerPainted = html;
+  const next = host.querySelector(".drawer-body");
+  if (next) next.scrollTop = scroll;
+}
+
+function openDrawer(kind, id) {
+  state.drawer = { kind, id };
+  renderDrawer();
+
+  // A stage shows the JSON its agent returned, when that stage wrote one.
+  if (kind === "stage") {
+    const want = STAGE_OUT[id] ?? id;
+    const outName = (state.detail?.outs ?? []).find((o) => o.name === want)?.name;
+    if (outName) {
+      state.drawer.out = { name: outName, text: null };
+      renderDrawer();
+      api(`/api/apps/${encodeURIComponent(state.app)}/out/${encodeURIComponent(outName)}`)
+        .then((text) => {
+          if (state.drawer?.kind === "stage" && state.drawer.id === id) {
+            state.drawer.out.text = typeof text === "string" ? text : JSON.stringify(text, null, 2);
+            renderDrawer();
+          }
+        })
+        .catch(() => { /* the stage simply has no output yet */ });
+    }
+  }
+
+  // An incident may not be in the overview's recent handful, so fetch it in full.
+  if (kind === "incident") {
+    const known = (state.data?.incidents?.recent ?? []).find((x) => String(x.id) === String(id))
+      ?? (state.detail?.incidents ?? []).find((x) => String(x.id) === String(id));
+    state.drawer.data = known ?? null;
+    renderDrawer();
+    api(`/api/incidents/${encodeURIComponent(id)}`)
+      .then((data) => {
+        if (state.drawer?.kind === "incident" && String(state.drawer.id) === String(id)) {
+          state.drawer.data = data;
+          renderDrawer();
+        }
+      })
+      .catch(() => { /* keep whatever the list already gave us */ });
+  }
+}
+
+function closeDrawer() {
+  state.drawer = null;
+  renderDrawer();
+}
+
 // ---------------------------------------------------------------- modal
 
 let modalCleanup = null;
@@ -904,12 +1112,28 @@ function newBuildModal() {
 // ---------------------------------------------------------------- events
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-view], [data-app], [data-tab], [data-log], [data-doc], [data-retry], [data-stop-run], [data-run-log], [data-stop-app], [data-rearm], [data-start], [data-incident]");
+  if (e.target.id === "drawer-x" || e.target.id === "drawer-mask") return closeDrawer();
+
+  const t = e.target.closest("[data-view], [data-app], [data-tab], [data-log], [data-doc], [data-retry], [data-stop-run], [data-run-log], [data-stop-app], [data-rearm], [data-start], [data-incident], [data-stage], [data-task], [data-defect], [data-drawer-log]");
   if (!t) return;
 
   if (t.dataset.view) return go(t.dataset.view);
   if (t.dataset.app) return go("app", t.dataset.app);
-  if (t.dataset.incident !== undefined) return go("incidents");
+
+  // The drill-downs. Each of these used to be a row you could not open.
+  if (t.dataset.incident !== undefined) return openDrawer("incident", t.dataset.incident);
+  if (t.dataset.stage) return openDrawer("stage", t.dataset.stage);
+  if (t.dataset.task) return openDrawer("task", t.dataset.task);
+  if (t.dataset.defect !== undefined) return openDrawer("defect", Number(t.dataset.defect));
+
+  if (t.dataset.drawerLog) {
+    state.logName = t.dataset.drawerLog;
+    state.tab = "logs";
+    closeDrawer();
+    setHash();
+    render();
+    return loadLog();
+  }
 
   if (t.dataset.tab) {
     state.tab = t.dataset.tab;
@@ -969,7 +1193,11 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModal();
+  // Innermost first: a modal sits above the drawer, so Escape closes that one.
+  if (e.key === "Escape") {
+    if ($("#overlay")) closeModal();
+    else if (state.drawer) closeDrawer();
+  }
   if (e.key === "n" && !/input|textarea|select/i.test(e.target.tagName)) { e.preventDefault(); newBuildModal(); }
 });
 

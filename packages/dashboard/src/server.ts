@@ -19,7 +19,7 @@ import {
 } from "@factory/shared";
 import { getIncident, setIncident } from "@factory/sentinel";
 import { rearmState, stopApp } from "@factory/orchestrator";
-import { appDetail, healthOf, listApps, overview, readAppLog, readDoc, readLog, spendOverview } from "./data.ts";
+import { appDetail, healthOf, listApps, overview, readAppLog, readDoc, readLog, readOut, spendOverview } from "./data.ts";
 import { listRuns, RunConflictError, runLog, startRun, stopRun, type RunMode } from "./runs.ts";
 
 const log = makeLogger("dashboard");
@@ -163,6 +163,41 @@ export function startDashboard(opts: DashboardOptions = {}): void {
         return;
       }
       res.type("text/plain").send(doc);
+    }),
+  );
+
+  /** One agent's JSON contract, for the stage drawer. */
+  app.get(
+    "/api/apps/:app/out/:name",
+    auth,
+    wrap((req, res) => {
+      const name = withApp(req, res);
+      if (!name) return;
+      const out = safeLogName(req.params.name);
+      if (!out) {
+        res.status(400).json({ error: "bad output name" });
+        return;
+      }
+      const body = readOut(appDir(name), out);
+      if (body === null) {
+        res.status(404).json({ error: "no such output" });
+        return;
+      }
+      res.type("text/plain").send(body);
+    }),
+  );
+
+  /** One incident in full. The overview only carries the most recent handful. */
+  app.get(
+    "/api/incidents/:id",
+    auth,
+    wrap((req, res) => {
+      const incident = getIncident(Number(req.params.id));
+      if (!incident) {
+        res.status(404).json({ error: "no such incident" });
+        return;
+      }
+      res.json(incident);
     }),
   );
 

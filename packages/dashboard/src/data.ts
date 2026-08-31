@@ -161,6 +161,7 @@ export function appDetail(name: string) {
     spendByRole: spendByRole(summary.id),
     logs: listLogs(summary.dir),
     docs: readDocs(summary.dir),
+    outs: listOuts(summary.dir),
   };
 }
 
@@ -202,6 +203,35 @@ function readDocs(dir: string): { name: string; size: number }[] {
     name: f,
     size: fs.statSync(path.join(dir, f)).size,
   }));
+}
+
+/**
+ * The JSON contracts agents wrote (`.factory/out/<name>.json`).
+ *
+ * This is the structured thing a stage actually produced - the requirements it
+ * gathered, the task DAG it planned, the defects a gate found - so the stage
+ * drawer can show the output rather than only the transcript that led to it.
+ */
+export function listOuts(dir: string): LogFile[] {
+  const outDir = path.join(dir, ".factory", "out");
+  if (!fs.existsSync(outDir)) return [];
+  return fs
+    .readdirSync(outDir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => {
+      const st = fs.statSync(path.join(outDir, name));
+      return { name: name.replace(/\.json$/, ""), size: st.size, modified: st.mtime.toISOString() };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Read one agent contract. The name is validated by the caller. */
+export function readOut(dir: string, name: string, maxBytes = 200_000): string | null {
+  try {
+    return fs.readFileSync(path.join(dir, ".factory", "out", `${name}.json`), "utf8").slice(0, maxBytes);
+  } catch {
+    return null;
+  }
 }
 
 export function readDoc(dir: string, name: string): string | null {
