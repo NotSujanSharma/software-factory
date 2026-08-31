@@ -33,6 +33,7 @@ export const DEFAULT_DENY_COMMANDS: string[] = [
 ];
 
 const DEFAULTS: FactoryConfig = {
+  provider: "claude",
   model: "claude-opus-5",
   models: {},
   workspaceDir: "workspace",

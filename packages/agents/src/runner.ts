@@ -16,6 +16,7 @@ import {
 } from "@factory/shared";
 import { formatDuration, isLimitMessage, planLimitWait } from "./limits.ts";
 import { makeGuard, type Guard } from "./guard.ts";
+import { runCodexAgent } from "./codex.ts";
 
 export type Role =
   | "requirements"
@@ -39,7 +40,7 @@ export interface AgentRunResult {
 
 const promptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../prompts");
 
-function rolePrompt(role: Role): string {
+export function rolePrompt(role: Role): string {
   return fs.readFileSync(path.join(promptsDir, `${role}.md`), "utf8");
 }
 
@@ -71,6 +72,19 @@ async function runAgentOnce(
   record: (line: string) => void,
   guard: Guard,
 ): Promise<AgentRunResult> {
+  if (cfg.provider === "codex") {
+    return runCodexAgent({
+      prompt: opts.prompt,
+      cwd: opts.cwd,
+      model,
+      maxTurns: opts.maxTurns ?? cfg.budget.maxTurnsPerRun,
+      rolePrompt: rolePrompt(opts.role),
+      guard,
+      log,
+      record,
+    });
+  }
+
   let result: AgentRunResult = { text: "", costUsd: 0, turns: 0, isError: true, denials: [] };
 
   const q = query({

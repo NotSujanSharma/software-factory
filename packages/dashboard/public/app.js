@@ -731,7 +731,7 @@ function updateChrome() {
   const open = d.incidents.open + d.incidents.healing;
   $("#c-incidents").textContent = open || "";
   $("#c-runs").textContent = d.activeRuns || "";
-  $("#f-model").textContent = d.config.model;
+  $("#f-model").textContent = `${d.config.provider} · ${d.config.model}`;
   $("#f-sandbox").textContent = d.config.sandbox ? "on" : "off";
   $("#f-budget").textContent = d.config.budgets ? "on" : "off";
 }

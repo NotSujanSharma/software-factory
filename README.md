@@ -13,10 +13,23 @@ A multi-agent framework that builds applications from a prompt, then keeps them 
 ## Setup
 
 1. `npm install`
-2. Auth for agents: existing Claude Code login is used automatically (or set `ANTHROPIC_API_KEY`).
+2. Choose an agent provider. Claude is the default and uses the existing Claude Code login (or `ANTHROPIC_API_KEY`). To use Codex instead, install and authenticate the Codex CLI, then set `"provider": "codex"` and a Codex model in `factory.config.json`.
 3. `GITHUB_TOKEN` env var with `repo` scope (optional - without it everything runs local-only and healing pushes local branches instead of PRs). It is never written to disk: remotes store `https://x-access-token@github.com/...` and the token is supplied per-command through `GIT_ASKPASS`.
    If you ran an earlier version, `factory doctor --fix` scrubs tokens out of existing repos - then rotate that token, because it has been sitting in a file.
-4. Tune `factory.config.json` (model, iteration limits, concurrency caps, ports, approvals).
+4. Tune `factory.config.json` (provider, model, iteration limits, concurrency caps, ports, approvals).
+
+The factory supports both providers through the same stage and prompt system:
+
+```json
+{
+  "provider": "codex",
+  "model": "gpt-5.3-codex"
+}
+```
+
+Codex runs use `codex exec --json --sandbox workspace-write --ephemeral` in the app's worktree. The adapter consumes its JSONL events and keeps the existing `.factory/` transcripts and output contracts. The Claude Agent SDK remains available by setting `"provider": "claude"`.
+
+Codex CLI currently does not include a monetary total in its JSONL result events, so Codex runs are recorded with zero reported provider cost until an explicit pricing configuration is added. The factory still enforces the per-run tool-call ceiling and Codex's workspace sandbox; Claude's SDK-level tool hook remains specific to Claude runs.
 
 ## Usage
 

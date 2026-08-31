@@ -290,6 +290,7 @@ export function overview() {
     },
     spend: spendOverview(),
     config: {
+      provider: cfg.provider,
       model: cfg.model,
       sentinelUrl: cfg.sentinel.url,
       devConcurrency: cfg.limits.devConcurrency,

@@ -39,7 +39,7 @@ export function redact(text: string): string {
     out = out.replace(re, (m, prefix?: string) => (prefix ? `${prefix}<redacted>@` : "<redacted>"));
   }
   // Anything currently in the environment that looks like a credential.
-  for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "ANTHROPIC_API_KEY", "FACTORY_INGEST_KEY"]) {
+  for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "FACTORY_INGEST_KEY"]) {
     const v = process.env[name];
     if (v && v.length >= 8) out = out.split(v).join(`<${name}>`);
   }

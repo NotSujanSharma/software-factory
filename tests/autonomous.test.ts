@@ -130,6 +130,12 @@ test("the autonomous env var removes every approval gate, in-process and for chi
   }
 });
 
+test("agent provider defaults to Claude and accepts Codex configuration", () => {
+  const cfg = loadConfig();
+  assert.equal(cfg.provider, "claude");
+  assert.ok(["claude", "codex"].includes(cfg.provider));
+});
+
 // ---------- pipeline re-arming ----------
 
 function stateWith(): PipelineState {
