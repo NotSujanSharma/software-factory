@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   budgetReport,
+  AGENT_MODEL_CATALOG,
   loadConfig,
   probeHealth,
   recentSpend,
@@ -292,6 +293,7 @@ export function overview() {
     config: {
       provider: cfg.provider,
       model: cfg.model,
+      modelCatalog: AGENT_MODEL_CATALOG,
       sentinelUrl: cfg.sentinel.url,
       devConcurrency: cfg.limits.devConcurrency,
       autoMergeHealPRs: cfg.approvals.autoMergeHealPRs,
