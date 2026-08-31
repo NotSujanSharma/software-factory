@@ -20,6 +20,7 @@ import {
   formatUsd,
   githubToken,
   gitTry,
+  hasExecutable,
   hasEmbeddedCredential,
   makeLogger,
   remoteOf,
@@ -231,6 +232,9 @@ async function checkLeakedCredentials(cfg: FactoryConfig): Promise<CheckResult> 
 
 function checkConfig(cfg: FactoryConfig): CheckResult[] {
   const out: CheckResult[] = [];
+  if (cfg.provider !== "claude" && cfg.provider !== "codex") {
+    out.push(fail("config", `unknown agent provider: ${String(cfg.provider)}`, "Use provider `claude` or `codex`."));
+  }
   if (!cfg.model?.trim()) out.push(fail("config", "model is empty", "Set `model` in factory.config.json."));
 
   const b = cfg.budget;
@@ -265,6 +269,26 @@ function checkBudgetHeadroom(cfg: FactoryConfig): CheckResult {
  * dollars and hours before it would otherwise find out.
  */
 export async function probeAgentAuth(cfg: FactoryConfig): Promise<CheckResult> {
+  if (cfg.provider === "codex") {
+    if (!hasExecutable("codex")) {
+      return fail("agent auth", "Codex CLI is not installed or not on PATH", "Install Codex CLI and authenticate it, or set provider to claude.");
+    }
+    try {
+      const result = await run(
+        "codex",
+        ["exec", "--json", "--ephemeral", "--sandbox", "read-only", "-m", cfg.model, "Reply with exactly: ok"],
+        { timeoutMs: 30_000 },
+      );
+      const text = `${result.stdout}\n${result.stderr}`;
+      if (result.code !== 0 || /not logged in|login|unauthorized|invalid.*api.?key|authentication/i.test(text)) {
+        return fail("agent auth", `Codex probe failed: ${text.trim().slice(0, 160)}`, "Install/authenticate Codex, or set provider to claude.");
+      }
+      return pass("agent auth", `Codex agents can run on ${cfg.model}`);
+    } catch (err) {
+      return fail("agent auth", String(err).slice(0, 200), "Install/authenticate Codex, or set provider to claude.");
+    }
+  }
+
   try {
     let text = "";
     let isError = false;

@@ -33,6 +33,7 @@ export const DEFAULT_DENY_COMMANDS: string[] = [
 ];
 
 const DEFAULTS: FactoryConfig = {
+  provider: "claude",
   model: "claude-opus-5",
   models: {},
   workspaceDir: "workspace",
@@ -116,6 +117,10 @@ export function frameworkRoot(): string {
 /** Env var that flips this process (and anything it spawns) into unattended mode. */
 export const AUTONOMOUS_ENV = "FACTORY_AUTONOMOUS";
 
+/** Snapshot values injected into a spawned pipeline by the dashboard. */
+export const AGENT_PROVIDER_ENV = "FACTORY_AGENT_PROVIDER";
+export const AGENT_MODEL_ENV = "FACTORY_AGENT_MODEL";
+
 /**
  * Overrides layered on top of factory.config.json while `factory auto` runs.
  * This travels through the environment rather than a mutated object because every
@@ -136,7 +141,12 @@ export function loadConfig(): FactoryConfig {
   if (fs.existsSync(file)) {
     user = JSON.parse(fs.readFileSync(file, "utf8"));
   }
-  const merged = deepMerge(deepMerge(DEFAULTS, user), autonomousOverride());
+  const runOverride: Partial<FactoryConfig> = {};
+  if (process.env[AGENT_PROVIDER_ENV] === "claude" || process.env[AGENT_PROVIDER_ENV] === "codex") {
+    runOverride.provider = process.env[AGENT_PROVIDER_ENV];
+  }
+  if (process.env[AGENT_MODEL_ENV]?.trim()) runOverride.model = process.env[AGENT_MODEL_ENV]!.trim();
+  const merged = deepMerge(deepMerge(deepMerge(DEFAULTS, user), runOverride), autonomousOverride());
 
   // Deny rules are additive rather than replaced. Ordinary deep-merge semantics
   // would mean that adding one project-specific rule silently drops every built-in

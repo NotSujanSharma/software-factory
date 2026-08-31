@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import express, { type NextFunction, type Request, type Response } from "express";
 import {
   adminToken,
+  frameworkRoot,
   loadConfig,
   makeLogger,
   safeEqual,
@@ -217,6 +218,31 @@ export function startDashboard(opts: DashboardOptions = {}): void {
   );
 
   app.get("/api/cost", auth, wrap((_req, res) => res.json(spendOverview())));
+
+  app.get("/api/config", auth, wrap((_req, res) => {
+    const cfg = loadConfig();
+    res.json({ provider: cfg.provider, model: cfg.model });
+  }));
+
+  /** Update only the agent selection. Existing child runs use their startup snapshot. */
+  app.post("/api/config", auth, wrap((req, res) => {
+    const provider = req.body?.provider;
+    const model = typeof req.body?.model === "string" ? req.body.model.trim() : "";
+    if (provider !== "claude" && provider !== "codex") {
+      res.status(400).json({ error: "provider must be claude or codex" });
+      return;
+    }
+    if (!model || model.length > 128 || /[\u0000-\u001f\u007f]/.test(model)) {
+      res.status(400).json({ error: "model must be 1-128 characters without control characters" });
+      return;
+    }
+    const file = path.join(frameworkRoot(), "factory.config.json");
+    const current = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+    current.provider = provider;
+    current.model = model;
+    fs.writeFileSync(file, `${JSON.stringify(current, null, 2)}\n`);
+    res.json({ provider, model });
+  }));
 
   // ---------- act ----------
 

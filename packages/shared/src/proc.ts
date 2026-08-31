@@ -17,6 +17,7 @@
  * out of. Everything else (git, taskkill) is already a real executable.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
@@ -35,7 +36,7 @@ const JS_SHIMS: Record<string, string[]> = {
 const resolved = new Map<string, string | null>();
 
 /** Find `cmd` on PATH, honouring PATHEXT on Windows. */
-export function which(cmd: string): string | null {
+function whichOnPath(cmd: string): string | null {
   const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
   const exts =
     process.platform === "win32"
@@ -53,6 +54,39 @@ export function which(cmd: string): string | null {
       } catch {
         /* keep looking */
       }
+    }
+  }
+  return null;
+}
+
+/**
+ * GUI-launched dashboard processes do not always inherit the user's shell PATH.
+ * Codex is commonly installed in one of these user/app-managed locations, so
+ * discover it explicitly when PATH lookup misses it and pass the absolute path
+ * to the child process.
+ */
+export function which(cmd: string): string | null {
+  const onPath = whichOnPath(cmd);
+  if (onPath || cmd !== "codex") return onPath;
+
+  const candidates =
+    process.platform === "win32"
+      ? [
+          path.join(os.homedir(), ".local", "bin", "codex.exe"),
+          path.join(os.homedir(), ".codex", "bin", "codex.exe"),
+        ]
+      : [
+          path.join(os.homedir(), ".local", "bin", "codex"),
+          path.join(os.homedir(), ".codex", "packages", "standalone", "current", "bin", "codex"),
+          "/usr/lib/chatgpt/resources/codex",
+        ];
+
+  for (const candidate of candidates) {
+    try {
+      const st = fs.statSync(candidate);
+      if (st.isFile() && (process.platform === "win32" || (st.mode & 0o111) !== 0)) return candidate;
+    } catch {
+      /* keep looking */
     }
   }
   return null;
@@ -157,7 +191,8 @@ export function planSpawn(cmd: string, args: string[]): SpawnPlan {
   // executed directly, so fall back to a shell - and validate before doing so.
   const needsShell = process.platform === "win32" && JS_SHIMS[cmd] !== undefined;
   if (needsShell) assertShellSafe(cmd, args);
-  return { file: cmd, args, shell: needsShell };
+  // Keep ordinary commands as typed; only Codex needs the GUI-PATH fallback.
+  return { file: cmd === "codex" ? which(cmd) ?? cmd : cmd, args, shell: needsShell };
 }
 
 /** Run a command and capture output. Rejects on non-zero exit only when `check` is set. */

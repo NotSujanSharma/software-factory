@@ -10,6 +10,8 @@ export type StageName =
   | "evolution";
 
 export interface FactoryConfig {
+  /** Agent runtime used for all roles. */
+  provider: "claude" | "codex";
   model: string;
   /** Per-role model overrides; anything unset falls back to `model`. */
   models: ModelRoutes;

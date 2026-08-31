@@ -639,7 +639,7 @@ function viewCost() {
         <td>${esc(r.appName ?? "—")}</td>
         <td>${esc(r.role)}${r.isError ? ` <span class="pill s-failed plain">error</span>` : ""}</td>
         <td class="faint">${esc(r.stage ?? "—")}</td>
-        <td class="faint mono small">${esc(r.model)}</td>
+        <td class="faint mono small">${esc(r.provider ? `${r.provider} · ` : "")}${esc(r.model)}</td>
         <td class="num">${r.turns}</td><td class="num">${r.toolCalls}</td>
         <td class="num nowrap">${money(r.costUsd)}</td>
       </tr>`).join("")}</tbody></table>
@@ -653,10 +653,26 @@ function viewSettings() {
   const c = d.config;
   const flag = (on, yes, no) => `<span class="pill ${on ? "s-passed" : "s-warn"}">${on ? yes : no}</span>`;
   return `<div class="view"><div class="card">
-    <div class="card-head"><h2>Configuration</h2><span class="sub">edit factory.config.json to change these</span></div>
+    <div class="card-head"><h2>Configuration</h2><span class="sub">new pipelines use the selection below</span></div>
     <div class="card-body">
+      <form id="agent-config" class="config-form">
+        <label>Provider
+          <select id="agent-provider" name="provider">
+            <option value="claude" ${c.provider === "claude" ? "selected" : ""}>Claude</option>
+            <option value="codex" ${c.provider === "codex" ? "selected" : ""}>Codex</option>
+          </select>
+        </label>
+        <label>Model
+          <select id="agent-model" name="model">${modelOptions(c)}</select>
+        </label>
+        <label id="custom-model-wrap" class="custom-model-wrap" ${isKnownModel(c) ? "hidden" : ""}>Custom model ID
+          <input id="agent-custom-model" name="customModel" maxlength="128" value="${isKnownModel(c) ? "" : esc(c.model)}" autocomplete="off" spellcheck="false">
+        </label>
+        <button class="btn primary" type="submit">Save agent settings</button>
+      </form>
+      <p class="hint">This changes the default for future pipelines. A running pipeline keeps the provider and model it was started with.</p>
       <dl class="kv">
-        <dt>Model</dt><dd class="mono">${esc(c.model)}</dd>
+        <dt>Current agent</dt><dd class="mono">${esc(c.provider)} · ${esc(c.model)}</dd>
         <dt>Sentinel</dt><dd class="mono">${esc(c.sentinelUrl)}</dd>
         <dt>Dev concurrency</dt><dd>${c.devConcurrency} parallel agents, each in its own git worktree</dd>
         <dt>Sandbox</dt><dd>${flag(c.sandbox, "enabled", "disabled")}</dd>
@@ -667,6 +683,30 @@ function viewSettings() {
         already have. Exposing it on a network interface makes every request require the admin token.</div>
     </div>
   </div></div>`;
+}
+
+function isKnownModel(config) {
+  return (config.modelCatalog?.[config.provider] ?? []).some((m) => m.id === config.model);
+}
+
+function modelOptions(config) {
+  const models = config.modelCatalog?.[config.provider] ?? [];
+  const known = models.some((m) => m.id === config.model);
+  return models.map((m) => `<option value="${esc(m.id)}" ${m.id === config.model ? "selected" : ""}>${esc(m.label)} — ${esc(m.detail)}</option>`).join("")
+    + (!known ? `<option value="__custom__" selected>Current custom model</option>` : "")
+    + `<option value="__custom__">Custom model ID…</option>`;
+}
+
+function syncModelChoices() {
+  const select = $("#agent-model");
+  const provider = $("#agent-provider")?.value;
+  const config = state.data?.config;
+  if (!select || !provider || !config) return;
+  const models = config.modelCatalog?.[provider] ?? [];
+  select.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)} — ${esc(m.detail)}</option>`).join("")
+    + `<option value="__custom__">Custom model ID…</option>`;
+  select.value = models[0]?.id ?? "__custom__";
+  $("#custom-model-wrap").hidden = select.value !== "__custom__";
 }
 
 // ---------------------------------------------------------------- rendering
@@ -731,7 +771,7 @@ function updateChrome() {
   const open = d.incidents.open + d.incidents.healing;
   $("#c-incidents").textContent = open || "";
   $("#c-runs").textContent = d.activeRuns || "";
-  $("#f-model").textContent = d.config.model;
+  $("#f-model").textContent = `${d.config.provider} · ${d.config.model}`;
   $("#f-sandbox").textContent = d.config.sandbox ? "on" : "off";
   $("#f-budget").textContent = d.config.budgets ? "on" : "off";
 }
@@ -1191,6 +1231,22 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("change", (e) => {
   if (e.target.id === "follow") state.logFollow = e.target.checked;
+  if (e.target.id === "agent-provider") syncModelChoices();
+  if (e.target.id === "agent-model") $("#custom-model-wrap").hidden = e.target.value !== "__custom__";
+});
+
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "agent-config") return;
+  e.preventDefault();
+  const form = e.target;
+  const body = Object.fromEntries(new FormData(form));
+  if (body.model === "__custom__") body.model = body.customModel;
+  delete body.customModel;
+  try {
+    await api("/api/config", { method: "POST", body: JSON.stringify(body) });
+    toast("Agent settings saved. New pipelines will use them.", "ok");
+    await refresh();
+  } catch (err) { toast(err.message, "error"); }
 });
 
 document.addEventListener("keydown", (e) => {

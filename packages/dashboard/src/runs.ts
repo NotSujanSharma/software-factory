@@ -9,7 +9,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { frameworkRoot, killTree, makeLogger, spawnDetached } from "@factory/shared";
+import { AGENT_MODEL_ENV, AGENT_PROVIDER_ENV, frameworkRoot, killTree, loadConfig, makeLogger, spawnDetached } from "@factory/shared";
 
 const log = makeLogger("runs");
 
@@ -26,6 +26,9 @@ export interface BuildRun {
   /** Set when the process is no longer alive. */
   finishedAt?: string;
   exitReason?: string;
+  /** Provider/model captured when this run was created. */
+  provider?: "claude" | "codex";
+  model?: string;
 }
 
 function runsDir(): string {
@@ -139,9 +142,19 @@ export function startRun(opts: StartOptions): BuildRun {
   const logFile = path.join(runsDir(), `${id}.log`);
   fs.writeFileSync(logFile, `# factory ${opts.mode} ${opts.app}\n# started ${new Date().toISOString()}\n\n`);
 
+  const cfg = loadConfig();
+
+  // Snapshot these values into the child. Agent calls load config independently,
+  // so without this a dashboard edit could silently switch an active pipeline
+  // halfway through its stages.
+  const agentEnv = {
+    [AGENT_PROVIDER_ENV]: cfg.provider,
+    [AGENT_MODEL_ENV]: cfg.model,
+  };
+
   // npm is resolved to `node npm-cli.js` by planSpawn, so there is no shell and the
   // prompt - which is arbitrary user text - is passed as one argv element.
-  const pid = spawnDetached("npm", args, { cwd: frameworkRoot(), logFile });
+  const pid = spawnDetached("npm", args, { cwd: frameworkRoot(), logFile, env: agentEnv });
   if (!pid) throw new Error("could not start the pipeline process");
 
   const run: BuildRun = {
@@ -152,6 +165,8 @@ export function startRun(opts: StartOptions): BuildRun {
     pid,
     startedAt: new Date().toISOString(),
     logFile,
+    provider: cfg.provider,
+    model: cfg.model,
   };
   writeRegistry([run, ...readRegistry()]);
   log.ok(`started ${opts.mode} for ${opts.app} (pid ${pid})`);
