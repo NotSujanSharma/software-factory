@@ -2,10 +2,14 @@
  * Factory dashboard.
  *
  * Editorial, not applike: paper and ink, hairline rules instead of boxed cards,
- * a serif for anything a person reads and a mono for anything a machine wrote.
- * One accent - vermilion - carries emphasis, links and failure, because in a tool
- * that reports on nine stages and five incident states, a second decorative hue
- * would just compete with the colours that mean something.
+ * a mono for anything a machine wrote, and one accent - vermilion - carrying
+ * emphasis, links and failure. In a tool that reports on nine stages and five
+ * incident states, a second decorative hue would only compete with the colours
+ * that mean something.
+ *
+ * The interface is set in a sans and the Docs tab in a serif, because reading a
+ * table of stages at a glance and reading a paragraph of architecture are not
+ * the same job. See --sans and --reading below.
  *
  * Light by default: this is a document about your factory. Dark is warm rather
  * than blue-black, for the second monitor it gets left on for hours.
@@ -49,13 +53,21 @@
   --idle-soft: rgba(138, 131, 122, 0.1);
 
   /*
-   * Named faces come before the ui-* generics on purpose. `ui-serif` resolves to
-   * the platform default, which is New York on macOS but DejaVu Serif on most
-   * Linux desktops - wide, dark and dated, and not what this page should be set
-   * in. Asking for Charter and Source Serif first means macOS still gets a face
-   * it has, Linux falls to Noto Serif, and nobody lands on DejaVu by accident.
+   * Two roles, because the interface and the documents are not the same job.
+   *
+   * `--sans` sets the instrument: headings, stage names, figures, tables. It is
+   * read in glances, and wants to be neutral and crisp.
+   *
+   * `--reading` sets the Docs tab, and nothing else. requirements.md and
+   * architecture.md are the two things here a person sits and reads a paragraph
+   * of, and a serif is still better at that than any sans.
+   *
+   * Named faces come before the ui-* generics on purpose: `ui-serif` resolves to
+   * New York on macOS but DejaVu Serif on most Linux desktops - wide, dark and
+   * dated. Asking for Charter first means macOS gets a face it has, Linux falls
+   * to Noto Serif, and nobody lands on DejaVu by accident.
    */
-  --serif: Charter, "Bitstream Charter", "Source Serif 4", "Source Serif Pro",
+  --reading: Charter, "Bitstream Charter", "Source Serif 4", "Source Serif Pro",
     "Noto Serif", ui-serif, Georgia, "Times New Roman", serif;
   --sans: Inter, "Fira Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     Roboto, sans-serif;
@@ -143,12 +155,12 @@ a:hover { border-bottom-color: currentColor; }
    to wrap: at this sidebar width it will break anyway, so it may as well look
    intended. */
 .brand-name {
-  font-family: var(--serif);
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.16;
-  max-width: 7ch;
+  font-family: var(--sans);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.18;
+  max-width: 9ch;
 }
 .nav { padding: 4px 12px; flex: 1; overflow-y: auto; }
 .nav-label {
@@ -201,9 +213,9 @@ a:hover { border-bottom-color: currentColor; }
   flex-shrink: 0;
 }
 .topbar h1 {
-  font-family: var(--serif);
-  font-size: 25px; font-weight: 600; margin: 0;
-  letter-spacing: -0.02em; align-self: center;
+  font-family: var(--sans);
+  font-size: 23px; font-weight: 650; margin: 0;
+  letter-spacing: -0.022em; align-self: center;
 }
 .topbar .crumb {
   color: var(--ink-3); font-weight: 600; align-self: center;
@@ -279,8 +291,8 @@ label.field > span {
   padding: 10px 0 12px;
 }
 .card-head h2 {
-  font-family: var(--serif);
-  font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.012em;
+  font-family: var(--sans);
+  font-size: 15.5px; font-weight: 650; margin: 0; letter-spacing: -0.014em;
 }
 .card-head .sub { font-size: 12.5px; color: var(--ink-3); }
 .card-body { padding: 0 0 4px; }
@@ -301,9 +313,9 @@ label.field > span {
   text-transform: uppercase; letter-spacing: 0.1em;
 }
 .stat-value {
-  font-family: var(--serif);
-  font-size: 34px; font-weight: 600; margin-top: 6px;
-  letter-spacing: -0.025em; line-height: 1.05;
+  font-family: var(--sans);
+  font-size: 31px; font-weight: 650; margin-top: 6px;
+  letter-spacing: -0.03em; line-height: 1.05;
 }
 .stat-meta { font-size: 12px; color: var(--ink-3); margin-top: 5px; }
 .stat-value.ok { color: var(--ok); }
@@ -365,9 +377,9 @@ label.field > span {
 .ledger-mark.needs_human { color: var(--warn); }
 
 .ledger-name {
-  font-family: var(--serif);
-  font-size: 15.5px;
-  letter-spacing: -0.01em;
+  font-family: var(--sans);
+  font-size: 14.5px;
+  letter-spacing: -0.012em;
   text-transform: capitalize;
 }
 .ledger-row.is-current .ledger-name { font-weight: 650; }
@@ -399,7 +411,7 @@ label.field > span {
   margin-top: 14px; padding: 10px 14px;
   font-size: 13px; color: var(--ink-2);
   border-left: 2px solid var(--rule-strong);
-  font-family: var(--serif);
+  font-family: var(--sans);
 }
 .flow-note.warn { border-left-color: var(--warn); color: var(--warn); }
 .flow-note.failed { border-left-color: var(--danger); color: var(--danger); }
@@ -445,11 +457,11 @@ td strong { font-weight: 600; }
 .app-card:hover { border-top-color: var(--ink); }
 .app-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .app-name {
-  font-family: var(--serif); font-weight: 600; font-size: 19px; letter-spacing: -0.018em;
+  font-family: var(--sans); font-weight: 650; font-size: 17.5px; letter-spacing: -0.022em;
 }
 .app-prompt {
   color: var(--ink-2); font-size: 13px; margin-bottom: 2px;
-  font-family: var(--serif);
+  font-family: var(--sans);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   min-height: 2.9em;
 }
@@ -511,15 +523,15 @@ td strong { font-weight: 600; }
 .doc-view { overflow-y: auto; padding: 24px 34px 60px; }
 
 .md-h {
-  font-family: var(--serif); font-weight: 600; letter-spacing: -0.015em;
+  font-family: var(--reading); font-weight: 600; letter-spacing: -0.015em;
   margin: 26px 0 8px; line-height: 1.25;
 }
 .doc-view > .md-h:first-child { margin-top: 0; }
 h1.md-h { font-size: 26px; }
 h2.md-h { font-size: 19px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
 h3.md-h, h4.md-h { font-size: 15.5px; }
-.md-p { font-family: var(--serif); font-size: 15px; line-height: 1.65; margin: 0 0 12px; max-width: 68ch; }
-.md-list { font-family: var(--serif); font-size: 15px; line-height: 1.65; margin: 0 0 14px; padding-left: 22px; max-width: 68ch; }
+.md-p { font-family: var(--reading); font-size: 15px; line-height: 1.65; margin: 0 0 12px; max-width: 68ch; }
+.md-list { font-family: var(--reading); font-size: 15px; line-height: 1.65; margin: 0 0 14px; padding-left: 22px; max-width: 68ch; }
 .md-list li { margin-bottom: 5px; }
 .md-code {
   background: var(--paper-inset); border: 1px solid var(--rule);
@@ -550,8 +562,8 @@ h3.md-h, h4.md-h { font-size: 15.5px; }
   border-bottom: 1px solid var(--rule);
 }
 .modal-head h2 {
-  margin: 0; font-size: 20px; font-weight: 600;
-  font-family: var(--serif); letter-spacing: -0.015em;
+  margin: 0; font-size: 18px; font-weight: 650;
+  font-family: var(--sans); letter-spacing: -0.02em;
 }
 .modal-body { padding: 22px 24px; }
 .modal-foot {
@@ -568,12 +580,12 @@ h3.md-h, h4.md-h { font-size: 15.5px; }
 }
 .drawer-head { padding: 20px 24px 14px; border-bottom: 1px solid var(--rule); display: flex; align-items: baseline; gap: 10px; }
 .drawer-head h2 {
-  margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 600;
-  letter-spacing: -0.015em;
+  margin: 0; font-family: var(--sans); font-size: 18px; font-weight: 650;
+  letter-spacing: -0.02em;
 }
 .drawer-body { flex: 1; overflow-y: auto; padding: 22px 24px 48px; }
 .drawer-body .subhead:first-child { margin-top: 0; }
-.drawer-text { font-family: var(--serif); font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }
+.drawer-text { font-family: var(--sans); font-size: 13.5px; line-height: 1.6; margin: 0 0 10px; }
 .drawer-item {
   padding: 10px 0; border-bottom: 1px solid var(--rule);
 }
@@ -589,12 +601,12 @@ h3.md-h, h4.md-h { font-size: 15.5px; }
 .empty { text-align: center; padding: 54px 20px; color: var(--ink-3); }
 .empty-icon { display: none; }
 .empty h3 {
-  margin: 0 0 8px; font-size: 18px; font-weight: 600; color: var(--ink-2);
-  font-family: var(--serif); letter-spacing: -0.012em;
+  margin: 0 0 8px; font-size: 16px; font-weight: 650; color: var(--ink-2);
+  font-family: var(--sans); letter-spacing: -0.015em;
 }
 .empty p {
   margin: 0 0 18px; font-size: 13.5px; max-width: 420px; margin-inline: auto;
-  font-family: var(--serif);
+  font-family: var(--sans);
 }
 
 .row { display: flex; align-items: center; gap: 10px; }
@@ -609,9 +621,9 @@ h3.md-h, h4.md-h { font-size: 15.5px; }
 
 /* The prompt an app was built from, set as a standfirst under its title. */
 .standfirst {
-  font-family: var(--serif);
-  font-size: 16px; line-height: 1.5; color: var(--ink-2);
-  max-width: 62ch; margin-top: 12px;
+  font-family: var(--sans);
+  font-size: 14.5px; line-height: 1.55; color: var(--ink-2);
+  max-width: 68ch; margin-top: 12px;
 }
 
 /* Section headings inside a body: small caps rules, like a printed subhead. */
