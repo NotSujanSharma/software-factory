@@ -71,6 +71,10 @@ npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
   with consequences (rollback, deploy verdict); `isReachable()` is boot detection.
 - A failure a human must resolve carries `permanent` (`BudgetExceededError`,
   `PreflightError`) so `withStageRetries` parks instead of paying to retry.
+- Parallel dev agents each get a worktree (`createWorktree` / `commitWorktree` /
+  `mergeWorktree` in `shared/src/worktree.ts`). Worktree commits exclude
+  `.factory/` via pathspec, so bookkeeping can never cause a merge conflict. A
+  conflicted item is re-queued and rebuilt alone - never auto-resolved.
 - Never hard-code `npm` (or any other ecosystem's tooling) into a stage, a prompt
   or the healer. Commands come from `ctx.stack()` / `resolveStack(dir)` and run via
   `runStackPhase` / `startStackApp`. Prompts get `ctx.stackContext()`.

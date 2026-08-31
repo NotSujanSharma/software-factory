@@ -32,7 +32,7 @@ export async function createApp(cfg: FactoryConfig, name: string, prompt: string
   // build artefacts to this file once it knows what they are.
   fs.writeFileSync(
     path.join(dir, ".gitignore"),
-    [".factory/logs/", ".factory/app.log", ".factory/run.json", ".env", ""].join("\n"),
+    [".factory/logs/", ".factory/app.log", ".factory/run.json", ".factory/worktrees/", ".env", ""].join("\n"),
   );
   await commitAll(dir, "chore: factory pipeline initialized");
   return makeCtx(cfg, state, dir);

@@ -149,6 +149,43 @@ Patterns added in `sandbox.denyCommands` are **added to** the built-in list, nev
 substituted for it: adding one project rule must not silently drop fifteen safety
 rules.
 
+## Parallel development
+
+Independent work items run concurrently, capped by `limits.devConcurrency`. Each
+agent gets **its own git worktree on its own branch** - a real checkout sharing the
+object database - and the results are merged back one at a time.
+
+They used to share a single checkout. Two agents editing one tree is a race with no
+referee: they overwrite each other's files and `git add -A` commits whatever mixture
+survived. That is worse outside JavaScript, where a lockfile written by two
+processes at once (`Cargo.lock`, `go.sum`, `poetry.lock`) is corrupt rather than
+merely wrong.
+
+How a wave runs:
+
+1. One worktree per item, branched from the current tip - so each agent builds on
+   everything earlier waves produced.
+2. The stack's install command runs in each worktree, because dependencies live in
+   ignored directories git does not carry across.
+3. Agents work in isolation. They cannot see each other's edits, and the sandbox
+   guard confines each one to its own worktree.
+4. Each result is committed and merged back in turn.
+
+**Conflicts are reported, never guessed.** If two agents genuinely edited the same
+lines, the merge is aborted and that item goes back on the board to be rebuilt
+against the merged tree - alone, in the app checkout, where there is no merge and so
+no conflict to repeat. That rule is what guarantees the loop terminates: without it,
+two items that conflict with each other would be re-queued together forever.
+
+Factory bookkeeping (`.factory/`) is excluded from worktree commits. It is tracked
+in the app repo and the orchestrator rewrites it constantly, so committing it would
+make every parallel wave conflict on `state.json` rather than on real code.
+
+A single-item wave runs directly in the app checkout: there is nothing to isolate it
+from, and a worktree would only add a dependency install. Worktrees live in
+`.factory/worktrees/` (gitignored) and are pruned before and after every run, so an
+interrupted build leaves nothing behind.
+
 ## Any language, any framework
 
 The factory is not a Node factory. `npm install`, `npm test` and `npm start` used to
@@ -329,6 +366,8 @@ listening", which is a different question and must never decide a rollback.
 - Every agent tool call passes a guard that refuses the known-catastrophic moves.
 - `/ingest` is authenticated per app and rate limited; registration needs the admin token.
 - Stack commands are argv arrays checked against the deny list before they run.
+- Parallel agents work in isolated worktrees; an overlapping edit surfaces as a
+  merge conflict and a rebuild, never as silent data loss.
 - No credential is ever written to disk: remotes carry a username, never a token.
 - The environment is checked before a run spends anything, and a failed check is
   permanent rather than retried.
