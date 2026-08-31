@@ -640,6 +640,11 @@ h3.md-h, h4.md-h { font-size: 15.5px; }
   letter-spacing: 0.09em; font-weight: 600; padding-top: 3px;
 }
 .kv dd { margin: 0; word-break: break-word; }
+.config-form { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+.config-form label { display: grid; gap: 5px; color: var(--ink-3); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.config-form select, .config-form input { min-height: 36px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--paper-2); color: var(--ink); font: 13px var(--sans); }
+.config-form input { width: min(310px, 60vw); font-family: var(--mono); }
+.config-form select:focus, .config-form input:focus { outline: 2px solid var(--accent-soft); outline-offset: 1px; border-color: var(--accent); }
 
 .toast-host { position: fixed; bottom: 22px; right: 22px; z-index: 60; display: flex; flex-direction: column; gap: 9px; }
 .toast {

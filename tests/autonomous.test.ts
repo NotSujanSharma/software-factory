@@ -136,6 +136,23 @@ test("agent provider defaults to Claude and accepts Codex configuration", () => 
   assert.ok(["claude", "codex"].includes(cfg.provider));
 });
 
+test("a pipeline environment snapshot overrides later config reads", () => {
+  const oldProvider = process.env.FACTORY_AGENT_PROVIDER;
+  const oldModel = process.env.FACTORY_AGENT_MODEL;
+  process.env.FACTORY_AGENT_PROVIDER = "codex";
+  process.env.FACTORY_AGENT_MODEL = "gpt-5.3-codex";
+  try {
+    const cfg = loadConfig();
+    assert.equal(cfg.provider, "codex");
+    assert.equal(cfg.model, "gpt-5.3-codex");
+  } finally {
+    if (oldProvider === undefined) delete process.env.FACTORY_AGENT_PROVIDER;
+    else process.env.FACTORY_AGENT_PROVIDER = oldProvider;
+    if (oldModel === undefined) delete process.env.FACTORY_AGENT_MODEL;
+    else process.env.FACTORY_AGENT_MODEL = oldModel;
+  }
+});
+
 // ---------- pipeline re-arming ----------
 
 function stateWith(): PipelineState {

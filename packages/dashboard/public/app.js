@@ -639,7 +639,7 @@ function viewCost() {
         <td>${esc(r.appName ?? "—")}</td>
         <td>${esc(r.role)}${r.isError ? ` <span class="pill s-failed plain">error</span>` : ""}</td>
         <td class="faint">${esc(r.stage ?? "—")}</td>
-        <td class="faint mono small">${esc(r.model)}</td>
+        <td class="faint mono small">${esc(r.provider ? `${r.provider} · ` : "")}${esc(r.model)}</td>
         <td class="num">${r.turns}</td><td class="num">${r.toolCalls}</td>
         <td class="num nowrap">${money(r.costUsd)}</td>
       </tr>`).join("")}</tbody></table>
@@ -653,10 +653,27 @@ function viewSettings() {
   const c = d.config;
   const flag = (on, yes, no) => `<span class="pill ${on ? "s-passed" : "s-warn"}">${on ? yes : no}</span>`;
   return `<div class="view"><div class="card">
-    <div class="card-head"><h2>Configuration</h2><span class="sub">edit factory.config.json to change these</span></div>
+    <div class="card-head"><h2>Configuration</h2><span class="sub">new pipelines use the selection below</span></div>
     <div class="card-body">
+      <form id="agent-config" class="config-form">
+        <label>Provider
+          <select name="provider">
+            <option value="claude" ${c.provider === "claude" ? "selected" : ""}>Claude</option>
+            <option value="codex" ${c.provider === "codex" ? "selected" : ""}>Codex</option>
+          </select>
+        </label>
+        <label>Model
+          <input name="model" maxlength="128" value="${esc(c.model)}" autocomplete="off" spellcheck="false" list="model-presets">
+          <datalist id="model-presets">
+            <option value="claude-opus-5"></option><option value="claude-sonnet-4-5"></option>
+            <option value="gpt-5.3-codex"></option><option value="gpt-5-codex"></option><option value="codex-mini-latest"></option>
+          </datalist>
+        </label>
+        <button class="btn primary" type="submit">Save agent settings</button>
+      </form>
+      <p class="hint">This changes the default for future pipelines. A running pipeline keeps the provider and model it was started with.</p>
       <dl class="kv">
-        <dt>Model</dt><dd class="mono">${esc(c.model)}</dd>
+        <dt>Current agent</dt><dd class="mono">${esc(c.provider)} · ${esc(c.model)}</dd>
         <dt>Sentinel</dt><dd class="mono">${esc(c.sentinelUrl)}</dd>
         <dt>Dev concurrency</dt><dd>${c.devConcurrency} parallel agents, each in its own git worktree</dd>
         <dt>Sandbox</dt><dd>${flag(c.sandbox, "enabled", "disabled")}</dd>
@@ -1191,6 +1208,18 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("change", (e) => {
   if (e.target.id === "follow") state.logFollow = e.target.checked;
+});
+
+document.addEventListener("submit", async (e) => {
+  if (e.target.id !== "agent-config") return;
+  e.preventDefault();
+  const form = e.target;
+  const body = Object.fromEntries(new FormData(form));
+  try {
+    await api("/api/config", { method: "POST", body: JSON.stringify(body) });
+    toast("Agent settings saved. New pipelines will use them.", "ok");
+    await refresh();
+  } catch (err) { toast(err.message, "error"); }
 });
 
 document.addEventListener("keydown", (e) => {
