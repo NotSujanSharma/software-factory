@@ -44,6 +44,7 @@ const DEFAULTS: FactoryConfig = {
     rateLimit: { eventsPerMinute: 120, burst: 60, newIncidentsPerHour: 20 },
   },
   github: { enabled: true, owner: "", private: true },
+  dashboard: { port: 4700, host: "127.0.0.1" },
   // Conservative on purpose: a fresh clone must not be able to run up a surprise
   // bill. Raise these deliberately once you know what a run costs you.
   budget: {

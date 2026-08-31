@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Software Factory</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23faf9f6'/><text x='16' y='24' font-size='23' font-family='Georgia,serif' font-weight='600' fill='%23b0341f' text-anchor='middle'>F</text></svg>">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-name">Software Factory</div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="nav-label">Monitor</div>
+      <button class="nav-item" data-view="overview">Overview</button>
+      <button class="nav-item" data-view="apps">Applications <span class="count" id="c-apps"></span></button>
+      <button class="nav-item" data-view="incidents">Incidents <span class="count" id="c-incidents"></span></button>
+      <button class="nav-item" data-view="runs">Pipeline runs <span class="count" id="c-runs"></span></button>
+
+      <div class="nav-label">Operate</div>
+      <button class="nav-item" data-view="cost">Cost &amp; budget</button>
+      <button class="nav-item" data-view="settings">Configuration</button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn sm ghost" id="theme-toggle" title="Toggle theme" style="margin-left:-10px">Theme</button>
+      </div>
+      <div class="row"><span>Model</span><span class="right mono" id="f-model">—</span></div>
+      <div class="row"><span>Sandbox</span><span class="right mono" id="f-sandbox">—</span></div>
+      <div class="row"><span>Budgets</span><span class="right mono" id="f-budget">—</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="title">Overview</h1>
+      <span class="crumb" id="crumb"></span>
+      <div class="spacer"></div>
+      <span class="live off" id="live"><span class="live-dot"></span><span id="live-text">connecting</span></span>
+      <button class="btn primary" id="new-build">New build</button>
+    </header>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<div class="toast-host" id="toasts"></div>
+<div id="drawer-host"></div>
+<div id="modal-host"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

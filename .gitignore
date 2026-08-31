@@ -11,3 +11,4 @@ watchdog-*.log.err
 .factory-watchdog.pid
 .factory-askpass.cmd
 .factory-askpass.sh
+.factory-runs/

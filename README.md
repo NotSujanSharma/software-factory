@@ -32,6 +32,7 @@ npm run factory -- sentinel start    # error ingest + healing scheduler + dashbo
 npm run factory -- demo-error <app>  # plant a realistic bug and trigger it twice (healing e2e demo)
 npm run factory -- evolve <app>      # review + implement improvement proposals
 npm run factory -- stop <app>        # stop a running app
+npm run dashboard                    # control + monitoring UI on :4700
 npm run factory -- doctor            # check the environment before it costs you a build
 npm run factory -- cost              # spend ledger + remaining budget headroom
 npm run factory -- rotate-key <app>  # issue a new ingest key for an app
@@ -148,6 +149,78 @@ worth doing.
 Patterns added in `sandbox.denyCommands` are **added to** the built-in list, never
 substituted for it: adding one project rule must not silently drop fifteen safety
 rules.
+
+## Dashboard
+
+```bash
+npm run dashboard                 # http://localhost:4700
+npm run factory -- dashboard --sentinel   # and host the sentinel in the same process
+```
+
+One page to start work and watch it happen:
+
+- **Overview** — what is building, what is parked, open incidents, spend against
+  budget. Anything needing a human is at the top rather than buried.
+- **Applications** — every app with its live pipeline flow, stack, task counts and
+  cost. Click through for stage history, the task DAG, defects, incidents, agent
+  transcripts, generated documents, and a per-stage cost breakdown.
+- **Pipeline runs** — every run started here, with its live log and a stop button.
+- **Incidents** — deduplicated errors, healing status, links to the fix, re-arm.
+- **Cost & budget** — spend by app, by agent role, and the recent agent runs behind
+  it, against the ceilings that are actually enforced.
+
+You can start a build from the prompt box, resume a parked pipeline, trigger an
+evolution round, stop a run, stop a deployed app, re-arm parked stages, and retry a
+parked incident. Updates arrive over server-sent events, so the page reflects the
+factory within about two seconds without polling loops.
+
+**Security.** The dashboard binds to loopback, where every endpoint is open: anything
+that can reach it can already run the CLI, so it grants no privilege a local shell
+does not have. Point `dashboard.host` at a real interface and every request needs
+the admin token, because "start a build" spends money and runs agents. It renders
+agent output, error messages and stack traces from generated applications, so
+everything it displays is escaped - none of that text is trustworthy.
+
+No build step: the page is plain HTML, CSS and JavaScript served straight from
+`packages/dashboard/public`. There is no bundler in this repo and the dashboard does
+not add one.
+
+## Parallel development
+
+Independent work items run concurrently, capped by `limits.devConcurrency`. Each
+agent gets **its own git worktree on its own branch** - a real checkout sharing the
+object database - and the results are merged back one at a time.
+
+They used to share a single checkout. Two agents editing one tree is a race with no
+referee: they overwrite each other's files and `git add -A` commits whatever mixture
+survived. That is worse outside JavaScript, where a lockfile written by two
+processes at once (`Cargo.lock`, `go.sum`, `poetry.lock`) is corrupt rather than
+merely wrong.
+
+How a wave runs:
+
+1. One worktree per item, branched from the current tip - so each agent builds on
+   everything earlier waves produced.
+2. The stack's install command runs in each worktree, because dependencies live in
+   ignored directories git does not carry across.
+3. Agents work in isolation. They cannot see each other's edits, and the sandbox
+   guard confines each one to its own worktree.
+4. Each result is committed and merged back in turn.
+
+**Conflicts are reported, never guessed.** If two agents genuinely edited the same
+lines, the merge is aborted and that item goes back on the board to be rebuilt
+against the merged tree - alone, in the app checkout, where there is no merge and so
+no conflict to repeat. That rule is what guarantees the loop terminates: without it,
+two items that conflict with each other would be re-queued together forever.
+
+Factory bookkeeping (`.factory/`) is excluded from worktree commits. It is tracked
+in the app repo and the orchestrator rewrites it constantly, so committing it would
+make every parallel wave conflict on `state.json` rather than on real code.
+
+A single-item wave runs directly in the app checkout: there is nothing to isolate it
+from, and a worktree would only add a dependency install. Worktrees live in
+`.factory/worktrees/` (gitignored) and are pruned before and after every run, so an
+interrupted build leaves nothing behind.
 
 ## Any language, any framework
 
@@ -329,6 +402,8 @@ listening", which is a different question and must never decide a rollback.
 - Every agent tool call passes a guard that refuses the known-catastrophic moves.
 - `/ingest` is authenticated per app and rate limited; registration needs the admin token.
 - Stack commands are argv arrays checked against the deny list before they run.
+- Parallel agents work in isolated worktrees; an overlapping edit surfaces as a
+  merge conflict and a rebuild, never as silent data loss.
 - No credential is ever written to disk: remotes carry a username, never a token.
 - The environment is checked before a run spends anything, and a failed check is
   permanent rather than retried.
@@ -340,6 +415,7 @@ packages/shared        types, config, git/GitHub helpers, process utils
 packages/agents        agent runner (Claude Agent SDK) + role prompts
 packages/orchestrator  pipeline state machine, stages, autonomous supervisor, factory CLI
 packages/sentinel      error ingest server, incident store, healing scheduler
+packages/dashboard     control + monitoring API and the UI it serves
 packages/stacks        stack definitions, detection, and command execution
 packages/error-sdk     vendored error handlers (Node, Python, browser) + the wire contract
 sentinel.db            incidents and app registrations

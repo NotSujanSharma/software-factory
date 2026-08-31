@@ -1,4 +1,4 @@
-# Self-Healing Application Factory — working notes for Claude
+# Self-Healing Application Factory — working notes for Codex
 
 ## Committing (standing instruction)
 
@@ -23,7 +23,7 @@ packages/dashboard     control + monitoring API, and the no-build UI it serves
 packages/stacks        stack definitions, detection, command execution, prompt context
 packages/shared        types, config loader, git/GitHub helpers, proc + http utils,
                        spend ledger + budget policy, secrets/redaction, admin token
-packages/agents        Claude Agent SDK runner, session-limit handling, role prompts,
+packages/agents        Codex Agent SDK runner, session-limit handling, role prompts,
                        PreToolUse guard (sandbox + per-run tool ceiling)
 packages/orchestrator  pipeline state machine, stages, autonomous supervisor, CLI
 packages/sentinel      error ingest server, SQLite incident store, healing scheduler,

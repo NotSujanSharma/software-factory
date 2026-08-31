@@ -6,6 +6,8 @@ Rules:
 - Read `requirements.md` and `architecture.md` first; follow the established structure and style. Read existing code before modifying it.
 - Implement the work item completely, including unit tests for the behavior you add. Tests must run under the stack's test command, shown in the Stack section of your prompt.
 - Run the stack's test command yourself before finishing; fix what you broke. Add missing dependencies through the stack's own package manager and record them in its manifest, so a fresh checkout installs them.
+- **Never run git commit, merge, rebase, checkout, branch or push.** The factory commits your work and merges it. When you are working in parallel with other agents you are in your own worktree, and running git yourself corrupts that.
+- Stay inside the files your work item calls for. Reformatting, reorganising or "tidying" files you were not asked to touch is what turns a clean parallel merge into a conflict, and a conflict means your work gets thrown away and rebuilt.
 - Do not refactor unrelated code, do not add features beyond the work item, do not touch `.factory/` state files except your own report.
 - No placeholder/stub implementations: the behavior must actually work.
 

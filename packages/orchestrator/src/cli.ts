@@ -162,6 +162,24 @@ program
   });
 
 program
+  .command("dashboard")
+  .option("--port <port>", "override the configured port")
+  .option("--host <host>", "override the bind address (non-loopback requires the admin token)")
+  .option("--sentinel", "also run the sentinel in this process", false)
+  .option("--skip-preflight", "start without checking the environment first", false)
+  .description("control and monitoring UI")
+  .action(async (opts: { port?: string; host?: string; sentinel: boolean; skipPreflight: boolean }) => {
+    const cfg = loadConfig();
+    if (!opts.skipPreflight) await preflight(cfg, { probe: false });
+    if (opts.sentinel) {
+      const { startSentinel } = await import("@factory/sentinel");
+      startSentinel();
+    }
+    const { startDashboard } = await import("@factory/dashboard");
+    startDashboard({ port: opts.port ? Number(opts.port) : undefined, host: opts.host });
+  });
+
+program
   .command("evolve")
   .argument("<app>")
   .option("--all", "implement all proposals without asking", false)
