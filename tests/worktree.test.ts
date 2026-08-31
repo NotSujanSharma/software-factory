@@ -286,3 +286,42 @@ test("a repo built before worktrees existed gets the ignore entry added", async 
   assert.ok(!(await git(repo, "ls-files")).includes("worktrees"), "worktrees must never be tracked");
   await pruneWorktrees(repo);
 });
+
+test("an app inside the framework's own repo still gets a repository of its own", async () => {
+  // The workspace lives inside the framework checkout by default, so asking "am I
+  // inside a work tree" is always yes. Answering that question instead of "am I a
+  // repo root" meant every commit meant for a generated app landed in the factory's
+  // repo - and would have had the healer clone the factory and deploy push it to
+  // GitHub as the app.
+  const { isRepoRoot } = await import("../packages/shared/src/git.ts");
+  const outer = await makeRepo({ "framework.js": "// the factory itself\n" });
+  // The real framework gitignores its workspace, exactly as this does.
+  fs.appendFileSync(path.join(outer, ".gitignore"), "workspace/\n");
+  await commitAll(outer, "chore: ignore the workspace");
+  const nested = path.join(outer, "workspace", "generated-app");
+  fs.mkdirSync(nested, { recursive: true });
+
+  assert.equal(await isRepoRoot(nested), false, "a fresh directory is not a repo root");
+  await ensureRepo(nested);
+  assert.equal(await isRepoRoot(nested), true, "ensureRepo must give it its own repository");
+  assert.ok(fs.existsSync(path.join(nested, ".git")), "the app needs its own .git");
+
+  fs.writeFileSync(path.join(nested, "app.js"), "console.log(1);\n");
+  await commitAll(nested, "feat: app work");
+
+  // The app's commit is in the app's repo...
+  assert.match(await git(nested, "log", "--oneline"), /app work/);
+  // ...and nowhere near the framework's.
+  assert.ok(!(await git(outer, "log", "--oneline")).includes("app work"),
+    "an app commit must never land in the framework repo");
+  assert.ok(!(await git(outer, "ls-files")).includes("generated-app"),
+    "no generated-app file may be tracked by the framework repo");
+  assert.equal(await git(outer, "status", "--porcelain"), "", "the framework tree must stay clean");
+});
+
+test("ensureRepo is idempotent and leaves an existing repo alone", async () => {
+  const repo = await makeRepo({ "a.js": "1\n" });
+  const before = await git(repo, "rev-parse", "HEAD");
+  await ensureRepo(repo);
+  assert.equal(await git(repo, "rev-parse", "HEAD"), before, "an existing repo must not be re-initialised");
+});

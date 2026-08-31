@@ -19,6 +19,7 @@ uncommitted in the working tree, and do not wait to be asked.
 ## Repo layout
 
 ```
+packages/dashboard     control + monitoring API, and the no-build UI it serves
 packages/stacks        stack definitions, detection, command execution, prompt context
 packages/shared        types, config loader, git/GitHub helpers, proc + http utils,
                        spend ledger + budget policy, secrets/redaction, admin token
@@ -43,6 +44,7 @@ npm test                                # tsx --test tests/*.test.ts
 npm run factory -- auto "<prompt>"      # unattended build -> heal -> evolve
 npm run factory -- sentinel start       # ingest + scheduler + dashboard on :4600
 npm run factory -- apps | status <app> | stop <app>
+npm run dashboard                       # control + monitoring UI on :4700
 npm run factory -- doctor [--no-probe] [--fix]          # environment preflight
 npm run factory -- cost [--app <name>] [--recent <n>]   # spend + budget headroom
 npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
@@ -71,6 +73,11 @@ npm run factory -- rotate-key <app>     # new ingest key (restart the app after)
   with consequences (rollback, deploy verdict); `isReachable()` is boot detection.
 - A failure a human must resolve carries `permanent` (`BudgetExceededError`,
   `PreflightError`) so `withStageRetries` parks instead of paying to retry.
+- `ensureRepo` must check for a repo *root*, not "inside a work tree": the
+  workspace sits inside the framework's own checkout, so the latter is always true
+  and every app commit would land in the factory's repo.
+- The dashboard has no build step. Keep `public/` plain HTML/CSS/JS, and escape
+  everything it renders - it displays agent output and generated-app stack traces.
 - Parallel dev agents each get a worktree (`createWorktree` / `commitWorktree` /
   `mergeWorktree` in `shared/src/worktree.ts`). Worktree commits exclude
   `.factory/` via pathspec, so bookkeeping can never cause a merge conflict. A

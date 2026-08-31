@@ -32,6 +32,7 @@ npm run factory -- sentinel start    # error ingest + healing scheduler + dashbo
 npm run factory -- demo-error <app>  # plant a realistic bug and trigger it twice (healing e2e demo)
 npm run factory -- evolve <app>      # review + implement improvement proposals
 npm run factory -- stop <app>        # stop a running app
+npm run dashboard                    # control + monitoring UI on :4700
 npm run factory -- doctor            # check the environment before it costs you a build
 npm run factory -- cost              # spend ledger + remaining budget headroom
 npm run factory -- rotate-key <app>  # issue a new ingest key for an app
@@ -148,6 +149,41 @@ worth doing.
 Patterns added in `sandbox.denyCommands` are **added to** the built-in list, never
 substituted for it: adding one project rule must not silently drop fifteen safety
 rules.
+
+## Dashboard
+
+```bash
+npm run dashboard                 # http://localhost:4700
+npm run factory -- dashboard --sentinel   # and host the sentinel in the same process
+```
+
+One page to start work and watch it happen:
+
+- **Overview** — what is building, what is parked, open incidents, spend against
+  budget. Anything needing a human is at the top rather than buried.
+- **Applications** — every app with its live pipeline flow, stack, task counts and
+  cost. Click through for stage history, the task DAG, defects, incidents, agent
+  transcripts, generated documents, and a per-stage cost breakdown.
+- **Pipeline runs** — every run started here, with its live log and a stop button.
+- **Incidents** — deduplicated errors, healing status, links to the fix, re-arm.
+- **Cost & budget** — spend by app, by agent role, and the recent agent runs behind
+  it, against the ceilings that are actually enforced.
+
+You can start a build from the prompt box, resume a parked pipeline, trigger an
+evolution round, stop a run, stop a deployed app, re-arm parked stages, and retry a
+parked incident. Updates arrive over server-sent events, so the page reflects the
+factory within about two seconds without polling loops.
+
+**Security.** The dashboard binds to loopback, where every endpoint is open: anything
+that can reach it can already run the CLI, so it grants no privilege a local shell
+does not have. Point `dashboard.host` at a real interface and every request needs
+the admin token, because "start a build" spends money and runs agents. It renders
+agent output, error messages and stack traces from generated applications, so
+everything it displays is escaped - none of that text is trustworthy.
+
+No build step: the page is plain HTML, CSS and JavaScript served straight from
+`packages/dashboard/public`. There is no bundler in this repo and the dashboard does
+not add one.
 
 ## Parallel development
 
@@ -379,6 +415,7 @@ packages/shared        types, config, git/GitHub helpers, process utils
 packages/agents        agent runner (Claude Agent SDK) + role prompts
 packages/orchestrator  pipeline state machine, stages, autonomous supervisor, factory CLI
 packages/sentinel      error ingest server, incident store, healing scheduler
+packages/dashboard     control + monitoring API and the UI it serves
 packages/stacks        stack definitions, detection, and command execution
 packages/error-sdk     vendored error handlers (Node, Python, browser) + the wire contract
 sentinel.db            incidents and app registrations

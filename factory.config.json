@@ -13,6 +13,10 @@
       "newIncidentsPerHour": 20
     }
   },
+  "dashboard": {
+    "port": 4700,
+    "host": "127.0.0.1"
+  },
   "github": {
     "enabled": true,
     "owner": "",

@@ -24,6 +24,8 @@ export interface FactoryConfig {
     rateLimit: IngestRateLimit;
   };
   github: { enabled: boolean; owner: string; private: boolean };
+  /** The control + monitoring UI. Loopback by default; see dashboard/src/server.ts. */
+  dashboard: { port: number; host: string };
   budget: BudgetConfig;
   sandbox: SandboxConfig;
   health: HealthConfig;

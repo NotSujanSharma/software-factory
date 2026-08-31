@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { run, type RunResult } from "./proc.ts";
 import { gitAuthEnv, hasEmbeddedCredential, remoteUrl } from "./gitauth.ts";
 
@@ -26,13 +28,36 @@ export async function gitClone(source: string, dest: string, timeoutMs = 120_000
   await run("git", ["clone", source, dest], { check: true, timeoutMs, env: gitAuthEnv() });
 }
 
+/**
+ * Is `dir` itself the root of a git repository, rather than merely inside one?
+ *
+ * Decided by the presence of a `.git` entry, not by comparing `--show-toplevel`
+ * against the path: on Windows git reports the long form of a path that may have
+ * been handed to us in 8.3 short form (`SUJANS~1`), so string comparison reports a
+ * repo root as nested. A `.git` directory is a normal repo and a `.git` file is a
+ * worktree; both mean this directory has a repository of its own.
+ */
+export async function isRepoRoot(dir: string): Promise<boolean> {
+  if (!fs.existsSync(path.join(dir, ".git"))) return false;
+  // Confirm git agrees, so a stray `.git` file cannot fool us into skipping init.
+  return (await gitTry(dir, "rev-parse", "--git-dir")) !== null;
+}
+
+/**
+ * Give `dir` its own git repository, unless it already is one.
+ *
+ * The check is "is this directory a repo root", not "is it inside a work tree".
+ * The workspace lives inside the framework's own checkout by default, so the
+ * second question is always yes - and answering it meant generated apps never got
+ * a repository of their own. Every commit intended for an app then landed in the
+ * framework repo instead, which also means the healer would clone the factory and
+ * deploy would push the factory to GitHub as if it were the app.
+ */
 export async function ensureRepo(dir: string): Promise<void> {
-  const inside = await gitTry(dir, "rev-parse", "--is-inside-work-tree");
-  if (inside !== "true") {
-    await git(dir, "init", "-b", "main");
-    await git(dir, "config", "user.email", "factory@self-healing.local");
-    await git(dir, "config", "user.name", "Factory Bot");
-  }
+  if (await isRepoRoot(dir)) return;
+  await git(dir, "init", "-b", "main");
+  await git(dir, "config", "user.email", "factory@self-healing.local");
+  await git(dir, "config", "user.name", "Factory Bot");
 }
 
 export async function commitAll(dir: string, message: string): Promise<string | null> {
