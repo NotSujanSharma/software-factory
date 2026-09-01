@@ -24,6 +24,21 @@ interface CodexOptions {
 }
 
 /**
+ * Codex nests the upstream API error as a JSON string inside `message`, so the
+ * useful part ("model X is not supported...") is two levels down.
+ */
+function codexErrorMessage(event: any): string {
+  const raw = typeof event?.message === "string" ? event.message : event?.error?.message;
+  if (typeof raw !== "string") return "";
+  try {
+    const inner = JSON.parse(raw);
+    return typeof inner?.error?.message === "string" ? inner.error.message : raw;
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * Run Codex without requiring Claude Code or an OpenAI SDK dependency.
  *
  * `codex exec --json` is deliberately used instead of scraping human-facing
@@ -51,13 +66,23 @@ export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
         opts.model,
         `${opts.rolePrompt}\n\n${opts.prompt}\n\nStop after at most ${opts.maxTurns} reasoning turns and write the requested output file.`,
       ],
-      { cwd: opts.cwd, env: process.env, shell: false, windowsHide: true },
+      {
+        cwd: opts.cwd,
+        env: process.env,
+        shell: false,
+        // stdin closed, never piped. `codex exec` appends piped stdin to the
+        // prompt, so an open pipe nobody writes to leaves it blocked on read
+        // forever - the pipeline reached its first agent and simply stopped.
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      },
     );
 
     let finalText = "";
     let turns = 0;
     let errorText = "";
     let stopped = false;
+    let failedEvent = "";
 
     const record = (line: string) => {
       const safe = redact(line);
@@ -79,8 +104,19 @@ export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
       record(`[codex] ${JSON.stringify(event)}`);
       if (event.type === "turn.completed") turns++;
 
+      // A rejected model or a refused request ends the turn without ever
+      // emitting an agent_message. Left unread, that surfaced as a successful
+      // run with empty output, and the stage failed on a missing JSON contract
+      // instead of on the reason.
+      if (event.type === "error" || event.type === "turn.failed") {
+        failedEvent = codexErrorMessage(event) || failedEvent || "Codex turn failed";
+      }
+
       const item = event.item;
       if (!item) return;
+      if (item.type === "error" && typeof item.message === "string") {
+        failedEvent = failedEvent || item.message;
+      }
       if (item.type === "agent_message" && typeof item.text === "string") {
         finalText = item.text;
       }
@@ -110,8 +146,9 @@ export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
     child.on("error", (err) => reject(err));
     child.on("close", (code) => {
       rl.close();
-      const failed = stopped || code !== 0;
-      const text = finalText || errorText.trim() || (failed ? `[codex exited ${code}]` : "");
+      const failed = stopped || code !== 0 || (failedEvent !== "" && finalText === "");
+      const text =
+        finalText || failedEvent || errorText.trim() || (failed ? `[codex exited ${code}]` : "");
       resolve({
         text,
         costUsd: 0,

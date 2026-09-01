@@ -214,6 +214,11 @@ export function run(
       cwd: opts.cwd,
       env: childEnv(cmd, opts.env),
       shell: plan.shell,
+      // stdin is closed, not piped. Nothing here ever writes to a child, and a
+      // pipe nobody closes reads as "input is still coming": the Codex CLI waits
+      // on it forever ("Reading additional input from stdin..."), which hung the
+      // preflight probe with no output at all rather than failing.
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
     let stdout = "";

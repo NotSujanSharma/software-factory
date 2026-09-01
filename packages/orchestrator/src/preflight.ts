@@ -280,7 +280,16 @@ export async function probeAgentAuth(cfg: FactoryConfig): Promise<CheckResult> {
         { timeoutMs: 30_000 },
       );
       const text = `${result.stdout}\n${result.stderr}`;
-      if (result.code !== 0 || /not logged in|login|unauthorized|invalid.*api.?key|authentication/i.test(text)) {
+      // `turn.failed` is how Codex reports a rejected model or a refused
+      // request. It does not always come with a non-zero exit, and none of the
+      // auth phrases appear in it, so without this the probe passes and every
+      // stage then fails on an empty agent response instead.
+      const turnFailed = /"type"\s*:\s*"turn\.failed"/.test(result.stdout);
+      if (
+        result.code !== 0 ||
+        turnFailed ||
+        /not logged in|login|unauthorized|invalid.*api.?key|authentication/i.test(text)
+      ) {
         return fail("agent auth", `Codex probe failed: ${text.trim().slice(0, 160)}`, "Install/authenticate Codex, or set provider to claude.");
       }
       return pass("agent auth", `Codex agents can run on ${cfg.model}`);
