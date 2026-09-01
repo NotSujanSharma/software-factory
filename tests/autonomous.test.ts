@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { isLimitMessage, parseLimitReset, planLimitWait, formatDuration } from "../packages/agents/src/limits.ts";
 import { rearmState, newState, STAGE_ORDER } from "../packages/orchestrator/src/state.ts";
-import { loadConfig, AUTONOMOUS_ENV } from "../packages/shared/src/config.ts";
+import { loadConfig, AUTONOMOUS_ENV, DEFAULT_CONFIG } from "../packages/shared/src/config.ts";
 import type { AppMeta, PipelineState } from "../packages/shared/src/types.ts";
 
 const WAIT_OPTS = { bufferMs: 60_000, maxWaitMs: 6 * 3_600_000, fallbackMs: 600_000 };
@@ -131,9 +131,11 @@ test("the autonomous env var removes every approval gate, in-process and for chi
 });
 
 test("agent provider defaults to Claude and accepts Codex configuration", () => {
-  const cfg = loadConfig();
-  assert.equal(cfg.provider, "claude");
-  assert.ok(["claude", "codex"].includes(cfg.provider));
+  // The shipped default, not whatever this checkout happens to be set to:
+  // asserting the live config file meant the suite failed for anyone who had
+  // legitimately switched the factory over to Codex.
+  assert.equal(DEFAULT_CONFIG.provider, "claude");
+  assert.ok(["claude", "codex"].includes(loadConfig().provider));
 });
 
 test("a pipeline environment snapshot overrides later config reads", () => {

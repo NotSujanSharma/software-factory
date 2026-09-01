@@ -32,7 +32,8 @@ export const DEFAULT_DENY_COMMANDS: string[] = [
   String.raw`\bgit\s+push\b[^|;&]*\s(-f|--force)(\s|$)`,
 ];
 
-const DEFAULTS: FactoryConfig = {
+/** Shipped defaults, before factory.config.json and any env override. */
+export const DEFAULT_CONFIG: FactoryConfig = {
   provider: "claude",
   model: "claude-opus-5",
   models: {},
@@ -146,7 +147,7 @@ export function loadConfig(): FactoryConfig {
     runOverride.provider = process.env[AGENT_PROVIDER_ENV];
   }
   if (process.env[AGENT_MODEL_ENV]?.trim()) runOverride.model = process.env[AGENT_MODEL_ENV]!.trim();
-  const merged = deepMerge(deepMerge(deepMerge(DEFAULTS, user), runOverride), autonomousOverride());
+  const merged = deepMerge(deepMerge(deepMerge(DEFAULT_CONFIG, user), runOverride), autonomousOverride());
 
   // Deny rules are additive rather than replaced. Ordinary deep-merge semantics
   // would mean that adding one project-specific rule silently drops every built-in

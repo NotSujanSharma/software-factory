@@ -56,8 +56,10 @@ export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
       [
         "exec",
         "--json",
-        "--sandbox",
-        "workspace-write",
+        // Approvals are routed through Codex's own automatic review, which runs
+        // in its workspace-write sandbox. Passing `--sandbox` as well is refused
+        // as a conflicting argument ("cannot be used with --approve-for-me"),
+        // and the CLI exits before the model is ever reached.
         "--approve-for-me",
         "--ephemeral",
         "--cd",
@@ -128,12 +130,15 @@ export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
           child.kill("SIGTERM");
         }
       }
-      if (item.type === "file_change" && typeof item.path === "string") {
-        const decision = opts.guard.check("Write", { file_path: item.path });
-        if (!decision.allow && !stopped) {
-          stopped = true;
-          errorText = decision.reason ?? "Codex file change denied by the factory guard";
-          child.kill("SIGTERM");
+      if (item.type === "file_change" && Array.isArray(item.changes)) {
+        for (const change of item.changes) {
+          if (typeof change?.path !== "string") continue;
+          const decision = opts.guard.check("Write", { file_path: change.path });
+          if (!decision.allow && !stopped) {
+            stopped = true;
+            errorText = decision.reason ?? "Codex file change denied by the factory guard";
+            child.kill("SIGTERM");
+          }
         }
       }
     });
@@ -142,6 +147,15 @@ export function runCodexAgent(opts: CodexOptions): Promise<CodexRunResult> {
       const text = redact(String(chunk));
       errorText += text;
       opts.record(`[codex:stderr] ${text.trim()}`);
+      // A CLI-level refusal (a bad flag, a rejected model) never reaches stdout,
+      // so without this the pipeline log showed a run that failed in zero turns
+      // and gave no reason anywhere a human would look.
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed && !/^Reading additional input from stdin/.test(trimmed)) {
+          opts.log.warn(`codex: ${trimmed.slice(0, 240)}`);
+        }
+      }
     });
     child.on("error", (err) => reject(err));
     child.on("close", (code) => {
