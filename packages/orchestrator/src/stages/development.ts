@@ -14,7 +14,7 @@ import {
 import { clearOut, outPath, DevReport } from "../state.ts";
 import { agentMeta, beginStage, endStage, readIfExists, type Ctx } from "./context.ts";
 
-function itemPrompt(ctx: Ctx, item: WorkItem, isolated: boolean): string {
+function itemPrompt(ctx: Ctx, item: WorkItem, isolated: boolean, dir: string): string {
   return [
     `Work item ${item.id}: ${item.title}`,
     item.description,
@@ -29,7 +29,12 @@ function itemPrompt(ctx: Ctx, item: WorkItem, isolated: boolean): string {
       : "",
     `Requirements summary:\n${readIfExists(ctx.appDir, "requirements.md", 6000)}`,
     `Architecture:\n${readIfExists(ctx.appDir, "architecture.md", 6000)}`,
-    `When done write .factory/out/dev-report.json with itemId "${item.id}".`,
+    // Absolute, not `.factory/out/dev-report.json`. In a worktree the relative
+    // form is ambiguous - the app checkout one level up has a `.factory/out`
+    // too - and a Codex agent resolves it there, so the report lands where the
+    // runner does not read it and the guard denies the write as an escape.
+    `When done write ${outPath(dir, "dev-report")} with itemId "${item.id}". ` +
+      `Use exactly that path, not a path relative to the repository root.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -46,7 +51,7 @@ async function runDevItem(ctx: Ctx, item: WorkItem, dir: string, isolated: boole
   try {
     const { data } = await runAgentForJson({
       role: "developer",
-      prompt: itemPrompt(ctx, item, isolated),
+      prompt: itemPrompt(ctx, item, isolated, dir),
       cwd: dir,
       outFile: outPath(dir, "dev-report"),
       parse: (raw) => DevReport.parse(raw),
