@@ -18,16 +18,16 @@ A multi-agent framework that builds applications from a prompt, then keeps them 
    If you ran an earlier version, `factory doctor --fix` scrubs tokens out of existing repos - then rotate that token, because it has been sitting in a file.
 4. Tune `factory.config.json` (provider, model, iteration limits, concurrency caps, ports, approvals).
 
-The factory supports both providers through the same stage and prompt system:
+The factory supports both providers through the same stage and prompt system. Use a model slug your Codex CLI actually accepts - `codex exec --help` and the dashboard's model picker list the current ones, and the API-era `*-codex` / `codex-mini-latest` names are rejected by a ChatGPT-account login:
 
 ```json
 {
   "provider": "codex",
-  "model": "gpt-5.3-codex"
+  "model": "gpt-5.6-terra"
 }
 ```
 
-Codex runs use `codex exec --json --sandbox workspace-write --ephemeral` in the app's worktree. The adapter consumes its JSONL events and keeps the existing `.factory/` transcripts and output contracts. The Claude Agent SDK remains available by setting `"provider": "claude"`.
+Codex runs use `codex exec --json --approve-for-me --ephemeral` in the app's worktree (`--approve-for-me` implies the workspace-write sandbox, and the CLI refuses `--sandbox` alongside it). The adapter consumes its JSONL events and keeps the existing `.factory/` transcripts and output contracts. The Claude Agent SDK remains available by setting `"provider": "claude"`.
 
 Codex CLI currently does not include a monetary total in its JSONL result events, so Codex runs are recorded with zero reported provider cost until an explicit pricing configuration is added. The factory still enforces the per-run tool-call ceiling and Codex's workspace sandbox; Claude's SDK-level tool hook remains specific to Claude runs.
 

@@ -142,11 +142,11 @@ test("a pipeline environment snapshot overrides later config reads", () => {
   const oldProvider = process.env.FACTORY_AGENT_PROVIDER;
   const oldModel = process.env.FACTORY_AGENT_MODEL;
   process.env.FACTORY_AGENT_PROVIDER = "codex";
-  process.env.FACTORY_AGENT_MODEL = "gpt-5.3-codex";
+  process.env.FACTORY_AGENT_MODEL = "gpt-5.6-terra";
   try {
     const cfg = loadConfig();
     assert.equal(cfg.provider, "codex");
-    assert.equal(cfg.model, "gpt-5.3-codex");
+    assert.equal(cfg.model, "gpt-5.6-terra");
   } finally {
     if (oldProvider === undefined) delete process.env.FACTORY_AGENT_PROVIDER;
     else process.env.FACTORY_AGENT_PROVIDER = oldProvider;
